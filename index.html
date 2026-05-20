@@ -1454,7 +1454,7 @@ function render() {
       el = document.getElementById(focusInfo.id);
     }
     if (el) {
-      el.focus();
+      el.focus({preventScroll: true});
       if (focusInfo.selectionStart != null && el.setSelectionRange) {
         try { el.setSelectionRange(focusInfo.selectionStart, focusInfo.selectionEnd); } catch(e) {}
       }
