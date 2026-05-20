@@ -1598,7 +1598,7 @@ function renderConfig() {
   h += `<label style="font-size:12px;font-weight:600">Profile Name<input type="text" id="cfg-name" value="${esc(p.name)}" style="margin-top:4px"></label>`;
   h += `<label style="font-size:12px;font-weight:600">Description<input type="text" id="cfg-desc" value="${esc(p.description)}" style="margin-top:4px"></label>`;
   h += `<div style="display:flex;gap:8px;align-items:center">`;
-  h += `<button class="btn btn-sm" id="btn-ai-suggest-kw" ${state.geminiKey ? '' : 'disabled'} style="background:${state.geminiKey ? 'var(--gold)' : 'var(--border-strong)'};color:${state.geminiKey ? '#fff' : 'var(--muted)'};justify-self:start;cursor:${state.geminiKey ? 'pointer' : 'not-allowed'}">✨ AI Suggest Keywords</button>`;
+  h += `<button class="btn btn-sm" id="btn-ai-suggest-kw" style="background:var(--gold);color:#fff;justify-self:start">✨ AI Suggest Keywords</button>`;
   if (!state.geminiKey) h += `<span style="font-size:10px;color:var(--muted)">Add Gemini key below to enable</span>`;
   h += `</div>`;
   h += `<div class="flex gap-2">`;
