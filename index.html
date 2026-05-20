@@ -173,7 +173,7 @@ input:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(19,78,74,0.0
       <button class="tab" data-tab="config">Configure</button>
       <button class="tab" data-tab="email">Weekly Email</button>
       <div style="flex:1"></div>
-      <button class="tab" id="btn-new-profile" style="border:1px solid rgba(255,255,255,0.2)">+ New Profile</button>
+      <button class="tab" id="btn-new-profile" onclick="createNewProfile()" style="border:1px solid rgba(255,255,255,0.2)">+ New Profile</button>
     </div>
   </div>
 </div>
@@ -284,6 +284,7 @@ let state = {
   message: null,
   kwSuggestions: null,
   sortBy: "score",  // "score" or "date"
+  isDraft: false,  // True when creating a new profile that hasn't been saved yet
   idLookup: null  // { authorIdx, loading, candidates }
 };
 
@@ -1421,7 +1422,11 @@ function render() {
 
   // Profile select
   const sel = $("profile-select");
-  sel.innerHTML = state.profiles.map(n => `<option value="${esc(n)}" ${n===state.activeProfile?"selected":""}>${esc(n)}</option>`).join("");
+  let selHtml = state.profiles.map(n => `<option value="${esc(n)}" ${n===state.activeProfile?"selected":""}>${esc(n)}</option>`).join("");
+  if (state.isDraft) {
+    selHtml = `<option value="" selected>📝 Unsaved Draft</option>` + selHtml;
+  }
+  sel.innerHTML = selHtml;
 
   // Tabs
   const resultCount = state.results?.length || 0;
@@ -1455,34 +1460,7 @@ function render() {
       }
     }
   }
-
-  // Direct binding for buttons that don't work via delegation
-  const aiSuggestBtn = document.getElementById("btn-ai-suggest-kw");
-  if (aiSuggestBtn) {
-    aiSuggestBtn.onclick = function(e) {
-      e.stopPropagation();
-      if (!state.geminiKey) {
-        state.message = { type: "warn", text: "Add a Gemini API key first." };
-        render(); return;
-      }
-      state.message = { type: "info", text: "Gemini is analyzing your description and searching for relevant terminology…" };
-      state.kwSuggestions = null;
-      state.view = "config";
-      render();
-      geminiSuggestKeywords(state.profile, state.geminiKey).then(suggestions => {
-        if (suggestions && Object.keys(suggestions).length > 0) {
-          state.kwSuggestions = suggestions;
-          state.message = { type: "success", text: "Keyword suggestions ready — click any to add, then Dismiss when done." };
-        } else {
-          state.message = { type: "warn", text: "Gemini returned no suggestions. Try a more descriptive profile description." };
-        }
-        state.view = "config"; render();
-      }).catch(err => {
-        state.message = { type: "warn", text: "Gemini error: " + (err.message || err) };
-        state.view = "config"; render();
-      });
-    };
-  }
+  // Note: AI Suggest button uses inline onclick="aiSuggestKeywords()" — no direct binding needed
 }
 
 function renderResults() {
@@ -1590,7 +1568,12 @@ function renderResults() {
 function renderConfig() {
   const p = state.profile;
   let h = `<div style="padding-top:16px">`;
-  h += `<h2 style="font-family:var(--font-head);font-size:20px;color:var(--navy);margin-bottom:4px">Configure Profile</h2>`;
+  if (state.isDraft) {
+    h += `<div class="alert alert-info" style="margin-top:0;display:flex;align-items:center;gap:10px"><span style="font-size:18px">📝</span><div><strong>New Profile Draft</strong> — not yet saved. Fill in the name and details, then click <strong>💾 Save Profile</strong> at the bottom.</div></div>`;
+    h += `<h2 style="font-family:var(--font-head);font-size:20px;color:var(--navy);margin-bottom:4px">Create Profile</h2>`;
+  } else {
+    h += `<h2 style="font-family:var(--font-head);font-size:20px;color:var(--navy);margin-bottom:4px">Configure Profile</h2>`;
+  }
   h += `<p style="font-size:13px;color:var(--muted);margin-bottom:16px;font-family:var(--font-mono)">Edit topics, authors, scoring. Lab mates: create a new profile for your field.</p>`;
 
   // Basics
@@ -1598,7 +1581,7 @@ function renderConfig() {
   h += `<label style="font-size:12px;font-weight:600">Profile Name<input type="text" id="cfg-name" value="${esc(p.name)}" style="margin-top:4px"></label>`;
   h += `<label style="font-size:12px;font-weight:600">Description<input type="text" id="cfg-desc" value="${esc(p.description)}" style="margin-top:4px"></label>`;
   h += `<div style="display:flex;gap:8px;align-items:center">`;
-  h += `<button class="btn btn-sm" id="btn-ai-suggest-kw" style="background:var(--gold);color:#fff;justify-self:start">✨ AI Suggest Keywords</button>`;
+  h += `<button class="btn btn-sm" id="btn-ai-suggest-kw" onclick="aiSuggestKeywords()" style="background:var(--gold);color:#fff;justify-self:start">✨ AI Suggest Keywords</button>`;
   if (!state.geminiKey) h += `<span style="font-size:10px;color:var(--muted)">Add Gemini key below to enable</span>`;
   h += `</div>`;
   h += `<div class="flex gap-2">`;
@@ -1734,8 +1717,8 @@ function renderConfig() {
 
   // Save
   h += `<div class="flex gap-2 mt-3">`;
-  h += `<button class="btn btn-primary flex-1" id="btn-save-config">💾 Save Profile</button>`;
-  if (state.profiles.length > 1) h += `<button class="btn btn-danger" id="btn-delete-profile">Delete</button>`;
+  h += `<button class="btn btn-primary flex-1" id="btn-save-config" onclick="saveCurrentProfile()">💾 Save Profile</button>`;
+  if (state.profiles.length > 1 && !state.isDraft) h += `<button class="btn btn-danger" id="btn-delete-profile" onclick="deleteCurrentProfile()">Delete</button>`;
   h += `</div></div>`;
   return h;
 }
@@ -1793,40 +1776,7 @@ function handleClick(e) {
   if (t.id === "btn-toggle-sort") { state.sortBy = state.sortBy === "score" ? "date" : "score"; render(); }
   if (t.id === "btn-email-now" || t.id === "btn-email-send") { state.profile.emailRecipients = ($("cfg-email-recipients")||{}).value || state.profile.emailRecipients; saveProfile(); emailDigest(); }
   if (t.id === "btn-copy-digest") { navigator.clipboard.writeText(generateDigest(state.results, state.profile)); state.message = { type:"success", text:"Full digest copied to clipboard!" }; render(); }
-  if (t.id === "btn-save-config") {
-    const oldName = state.activeProfile;
-    const newName = ($("cfg-name")?.value || state.profile.name).trim();
-    if (!newName) return;
-
-    // If name changed, clean up the old profile entry
-    if (oldName !== newName) {
-      localStorage.removeItem("lm-p:" + oldName);
-      localStorage.removeItem("lm-r:" + oldName);
-      state.profiles = state.profiles.filter(n => n !== oldName);
-    }
-
-    state.profile.name = newName;
-    state.profile.description = $("cfg-desc")?.value || "";
-    state.profile.lookbackDays = parseInt($("cfg-days")?.value) || 7;
-    state.profile.minScore = parseInt($("cfg-minscore")?.value) || 2;
-    state.profile.authorScore = parseInt($("cfg-authscore")?.value) || 8;
-    state.activeProfile = newName;
-    state.apiKey = $("cfg-apikey")?.value || "";
-    state.geminiKey = $("cfg-geminikey")?.value || "";
-    localStorage.setItem("lm-apikey", state.apiKey);
-    localStorage.setItem("lm-geminikey", state.geminiKey);
-    saveProfile(); state.message = { type:"success", text:"Profile saved!" }; state.view = "results"; render();
-  }
-  if (t.id === "btn-delete-profile" && state.profiles.length > 1) {
-    if (!confirm("Delete this profile?")) return;
-    state.profiles = state.profiles.filter(n => n !== state.activeProfile);
-    localStorage.removeItem("lm-p:" + state.activeProfile);
-    localStorage.removeItem("lm-r:" + state.activeProfile);
-    state.activeProfile = state.profiles[0];
-    state.profile = JSON.parse(localStorage.getItem("lm-p:" + state.activeProfile) || "null") || JSON.parse(JSON.stringify(DEFAULT_PROFILE));
-    localStorage.setItem("lm-profiles", JSON.stringify(state.profiles));
-    state.results = null; render();
-  }
+  // Note: btn-save-config and btn-delete-profile now use inline onclick → saveCurrentProfile()/deleteCurrentProfile()
   if (t.id === "btn-add-author") {
     const last = $("new-auth-last")?.value?.trim();
     if (!last) return;
@@ -2108,31 +2058,28 @@ function handleKeydown(e) {
 // Tab clicks
 $("tabs").addEventListener("click", e => {
   if (e.target.dataset.tab) { state.view = e.target.dataset.tab; state.message = null; render(); }
-  if (e.target.id === "btn-new-profile") {
-    const name = `New Profile ${state.profiles.length + 1}`;
-    state.profile = JSON.parse(JSON.stringify(DEFAULT_PROFILE));
-    state.profile.name = name;
-    state.profile.tiers.tier1.keywords = [];
-    state.profile.tiers.tier2.keywords = [];
-    state.profile.tiers.tier3.keywords = [];
-    state.profile.authors = [];
-    state.activeProfile = name;
-    state.results = null; state.searchDate = null;
-    saveProfile();
-    state.view = "config";
-    render();
-  }
+  // Note: + New Profile button uses inline onclick="createNewProfile()" for robustness
 });
 
 // Profile switch
 $("profile-select").addEventListener("change", e => {
   const name = e.target.value;
+  if (!name) return;  // Selected the "Unsaved Draft" placeholder — do nothing
+  // Warn if user has an unsaved draft
+  if (state.isDraft) {
+    if (!confirm("You have an unsaved new profile draft. Switching will discard it. Continue?")) {
+      // Restore the dropdown to its previous value (empty since draft has no name)
+      e.target.value = state.activeProfile || "";
+      return;
+    }
+  }
   state.activeProfile = name;
   state.profile = JSON.parse(localStorage.getItem("lm-p:" + name) || "null");
   if (!state.profile) state.profile = JSON.parse(JSON.stringify(DEFAULT_PROFILE));
   const r = JSON.parse(localStorage.getItem("lm-r:" + name) || "null");
   state.results = r?.papers || null;
   state.searchDate = r?.date || null;
+  state.isDraft = false;
   state.message = null;
   state.pipelineInfo = null;
   state.kwSuggestions = null;
@@ -2140,6 +2087,165 @@ $("profile-select").addEventListener("change", e => {
   localStorage.setItem("lm-active", name);
   render();
 });
+
+// ============================================================
+// GLOBAL FUNCTIONS (called via inline onclick — most robust pattern)
+// ============================================================
+
+// AI Suggest Keywords — called from inline onclick
+window.aiSuggestKeywords = async function() {
+  console.log("[AI Suggest] Button clicked. geminiKey set:", !!state.geminiKey);
+
+  // Read latest value from input field (in case user hasn't saved yet)
+  const keyInput = document.getElementById("cfg-geminikey");
+  const currentKey = (keyInput?.value || state.geminiKey || "").trim();
+
+  if (!currentKey) {
+    state.message = { type: "warn", text: "⚠️ Enter a Gemini API key in the field below first." };
+    render();
+    return;
+  }
+
+  // Sync state with the input value
+  state.geminiKey = currentKey;
+  localStorage.setItem("lm-geminikey", currentKey);
+
+  state.kwSuggestions = null;
+  state.message = { type: "info", text: "🤖 Gemini is analyzing your description and searching for relevant terminology…" };
+  state.view = "config";
+  render();
+
+  try {
+    console.log("[AI Suggest] Calling Gemini API…");
+    const suggestions = await geminiSuggestKeywords(state.profile, currentKey);
+    console.log("[AI Suggest] Response received:", suggestions);
+
+    if (suggestions && Object.keys(suggestions).length > 0) {
+      state.kwSuggestions = suggestions;
+      state.message = { type: "success", text: "✨ Suggestions ready! Click any keyword tag to add it." };
+    } else {
+      state.message = { type: "warn", text: "Gemini returned no usable suggestions. Try writing a more detailed description." };
+    }
+  } catch(err) {
+    console.error("[AI Suggest] Error:", err);
+    state.message = { type: "warn", text: `Gemini error: ${err.message || err}. Check the browser console (F12) for details.` };
+  }
+  state.view = "config";
+  render();
+};
+
+// Create New Profile — called from inline onclick on the tab button
+// Critical: creates draft in MEMORY only, doesn't save until user clicks Save
+window.createNewProfile = function() {
+  console.log("[New Profile] Creating draft");
+
+  state.profile = {
+    name: "",  // Empty — user must enter one
+    description: "",
+    lookbackDays: 7,
+    minScore: 2,
+    authorScore: 8,
+    tiers: {
+      tier1: { label: "Core Technique", score: 10, color: "#4a7c59", keywords: [] },
+      tier2: { label: "Adjacent Methods", score: 6, color: "#1e40af", keywords: [] },
+      tier3: { label: "Broader Field", score: 3, color: "#b08d57", keywords: [] }
+    },
+    authors: [],
+    emailRecipients: ""
+  };
+  state.activeProfile = null;       // No active profile — it's a draft
+  state.isDraft = true;             // Flag for UI to show draft warning
+  state.results = null;
+  state.searchDate = null;
+  state.kwSuggestions = null;
+  state.idLookup = null;
+  state.message = { type: "info", text: "📝 New profile draft. Enter a name and click Save Profile when ready." };
+  state.view = "config";
+  render();
+};
+
+// Save Current Profile — called from inline onclick on the Save button
+window.saveCurrentProfile = function() {
+  console.log("[Save] Saving profile. isDraft:", state.isDraft);
+
+  const newName = (document.getElementById("cfg-name")?.value || "").trim();
+  if (!newName) {
+    state.message = { type: "warn", text: "⚠️ Please enter a profile name before saving." };
+    render();
+    return;
+  }
+
+  const wasDraft = state.isDraft === true;
+  const oldName = state.activeProfile;
+
+  // For drafts: check for name conflicts with existing profiles
+  if (wasDraft && state.profiles.includes(newName)) {
+    state.message = { type: "warn", text: `⚠️ A profile named "${newName}" already exists. Choose a different name.` };
+    render();
+    return;
+  }
+
+  // For renames: clean up the old profile entry
+  if (!wasDraft && oldName && oldName !== newName) {
+    console.log("[Save] Renaming from", oldName, "to", newName, "— removing old entry");
+    localStorage.removeItem("lm-p:" + oldName);
+    localStorage.removeItem("lm-r:" + oldName);
+    state.profiles = state.profiles.filter(n => n !== oldName);
+  }
+
+  // Update profile from form fields
+  state.profile.name = newName;
+  state.profile.description = document.getElementById("cfg-desc")?.value || "";
+  state.profile.lookbackDays = parseInt(document.getElementById("cfg-days")?.value) || 7;
+  state.profile.minScore = parseInt(document.getElementById("cfg-minscore")?.value) || 2;
+  state.profile.authorScore = parseInt(document.getElementById("cfg-authscore")?.value) || 8;
+
+  state.activeProfile = newName;
+  state.isDraft = false;
+
+  // Save API keys
+  const geminiKeyInput = document.getElementById("cfg-geminikey");
+  if (geminiKeyInput) state.geminiKey = geminiKeyInput.value || "";
+  const apiKeyInput = document.getElementById("cfg-apikey");
+  if (apiKeyInput) state.apiKey = apiKeyInput.value || "";
+  localStorage.setItem("lm-apikey", state.apiKey);
+  localStorage.setItem("lm-geminikey", state.geminiKey);
+
+  // Persist profile (adds to state.profiles if not present, saves to localStorage)
+  saveProfile();
+
+  state.message = { type: "success", text: `✓ Profile "${newName}" saved!` };
+  state.view = "results";
+  render();
+};
+
+// Delete Current Profile — called from inline onclick
+window.deleteCurrentProfile = function() {
+  if (state.profiles.length <= 1) {
+    state.message = { type: "warn", text: "Can't delete the only profile." };
+    render();
+    return;
+  }
+  if (!confirm(`Delete profile "${state.activeProfile}"? This cannot be undone.`)) return;
+
+  console.log("[Delete] Removing profile:", state.activeProfile);
+  const toDelete = state.activeProfile;
+  state.profiles = state.profiles.filter(n => n !== toDelete);
+  localStorage.removeItem("lm-p:" + toDelete);
+  localStorage.removeItem("lm-r:" + toDelete);
+  localStorage.setItem("lm-profiles", JSON.stringify(state.profiles));
+
+  // Switch to the first remaining profile
+  state.activeProfile = state.profiles[0];
+  state.profile = JSON.parse(localStorage.getItem("lm-p:" + state.activeProfile) || "null")
+                  || JSON.parse(JSON.stringify(DEFAULT_PROFILE));
+  state.isDraft = false;
+  state.results = null;
+  state.searchDate = null;
+  state.message = { type: "success", text: `Deleted "${toDelete}".` };
+  state.view = "results";
+  render();
+};
 
 // ============================================================
 // INIT
