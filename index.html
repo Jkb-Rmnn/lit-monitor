@@ -98,9 +98,9 @@ body { background: var(--bg); color: var(--text); font-family: var(--font-body);
 .section-head { font-size: 12px; font-weight: 500; font-family: var(--font-mono); letter-spacing: 0.06em; padding-bottom: 6px; margin: 28px 0 12px; border-bottom: 1px solid; }
 
 /* Config */
-.config-section { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-bottom: 16px; }
-.config-header { padding: 10px 16px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
-.config-body { padding: 16px; }
+.config-section { background: var(--card); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-bottom: 16px; box-shadow: 0 1px 2px rgba(10,25,41,0.03); }
+.config-header { padding: 12px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+.config-body { padding: 16px 20px 20px; }
 .kw-tag { font-size: 12px; font-family: var(--font-body); padding: 4px 10px; border-radius: 14px; display: inline-flex; align-items: center; gap: 6px; margin: 3px; }
 .kw-remove { background: none; border: none; cursor: pointer; font-size: 14px; padding: 0; line-height: 1; opacity: 0.6; }
 .kw-remove:hover { opacity: 1; }
@@ -1975,7 +1975,7 @@ function renderConfig() {
   // Tiers
   for (const [tierKey, tier] of Object.entries(p.tiers)) {
     h += `<div class="config-section">`;
-    h += `<div class="config-header" style="background:${tier.color}10">`;
+    h += `<div class="config-header" style="background:${tier.color}0a">`;
     h += `<span style="font-weight:600;color:${tier.color};font-size:13px">${esc(tier.label)} <span style="font-weight:400;color:var(--muted);font-size:11px">+${tier.score}pts · ${tier.keywords.length} keywords</span></span>`;
     h += `</div><div class="config-body">`;
     h += `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px">`;
@@ -1996,9 +1996,9 @@ function renderConfig() {
   const authorsWithIds = p.authors.filter(a => a.openalexId).length;
   const authorsWithoutIds = p.authors.length - authorsWithIds;
   if (authorsWithoutIds > 0) {
-    h += `<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:11px;color:#92400e;font-family:var(--font-mono);line-height:1.5">
+    h += `<div style="background:rgba(176,141,87,0.07);border:1px solid rgba(176,141,87,0.3);border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:#6b4f24;line-height:1.5">
       <strong>${authorsWithoutIds} author${authorsWithoutIds>1?"s":""} without OpenAlex ID</strong> — click <strong>🔍 Find ID</strong> next to each name for exact disambiguation. Without an ID, matching is by name only and may produce false positives (e.g., "Lohse M." ≠ "Leon Merten Lohse").
-      <button class="btn btn-sm" id="btn-bulk-find-ids" style="background:var(--amber);color:#fff;margin-top:8px;font-size:10px;padding:5px 10px">⚡ Auto-resolve all (uses best match for each)</button>
+      <button class="btn btn-sm btn-gold" id="btn-bulk-find-ids" style="margin-top:8px;font-size:12px;padding:5px 12px">⚡ Auto-resolve all (uses best match for each)</button>
     </div>`;
   }
   p.authors.forEach((a, i) => {
