@@ -51,7 +51,7 @@ body { background: var(--bg); color: var(--text); font-family: var(--font-body);
 .tabs { display: flex; gap: 2px; margin-top: 20px; }
 .tab {
   padding: 10px 20px; border-radius: 8px 8px 0 0; border: none; cursor: pointer;
-  font-size: 12px; font-weight: 600; font-family: var(--font-mono);
+  font-size: 12px; font-weight: 500; font-family: var(--font-mono);
   background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.55);
   transition: all 0.2s; letter-spacing: 0.02em;
 }
@@ -76,16 +76,16 @@ body { background: var(--bg); color: var(--text); font-family: var(--font-body);
 .paper-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; font-size: 11px; color: #94a3b8; }
 .badge { padding: 2px 9px; border-radius: 10px; font-weight: 500; font-size: 11px; font-family: var(--font-mono); }
 .badge-source { background: rgba(19,78,74,0.08); color: var(--teal); }
-.badge-score-high { background: rgba(74,124,89,0.12); color: var(--sage); font-weight: 600; }
-.badge-score-med { background: rgba(30,64,175,0.08); color: var(--blue); font-weight: 600; }
-.badge-score-low { background: rgba(100,116,139,0.08); color: var(--muted); font-weight: 600; }
+.badge-score-high { background: rgba(74,124,89,0.12); color: var(--sage); font-weight: 500; }
+.badge-score-med { background: rgba(30,64,175,0.08); color: var(--blue); font-weight: 500; }
+.badge-score-low { background: rgba(100,116,139,0.08); color: var(--muted); font-weight: 500; }
 .tag { font-size: 10.5px; padding: 2px 8px; border-radius: 10px; display: inline-block; margin: 2px; font-family: var(--font-mono); letter-spacing: 0.01em; }
 .paper-abstract { font-size: 13.5px; color: #334155; line-height: 1.55; margin-top: 10px; overflow: hidden; }
-.toggle-abstract { background: none; border: none; color: var(--teal); font-size: 12px; cursor: pointer; padding: 6px 0; font-weight: 600; }
+.toggle-abstract { background: none; border: none; color: var(--teal); font-size: 12px; cursor: pointer; padding: 6px 0; font-weight: 500; }
 .toggle-abstract:hover { color: var(--gold); }
 
 /* Buttons */
-.btn { padding: 10px 22px; border-radius: 8px; border: none; cursor: pointer; font-size: 13px; font-weight: 600; font-family: var(--font-mono); transition: all 0.18s ease; display: inline-flex; align-items: center; gap: 6px; letter-spacing: 0.01em; }
+.btn { padding: 10px 22px; border-radius: 8px; border: none; cursor: pointer; font-size: 13px; font-weight: 500; font-family: var(--font-body); transition: all 0.18s ease; display: inline-flex; align-items: center; gap: 6px; letter-spacing: 0.01em; }
 .btn-primary { background: linear-gradient(135deg, var(--teal), var(--navy)); color: #fff; box-shadow: 0 2px 6px rgba(19,78,74,0.25); }
 .btn-primary:hover { box-shadow: 0 4px 14px rgba(19,78,74,0.35); transform: translateY(-1px); }
 .btn-primary:disabled { background: #94a3b8; box-shadow: none; cursor: wait; transform: none; }
@@ -95,18 +95,18 @@ body { background: var(--bg); color: var(--text); font-family: var(--font-body);
 .btn-sm { padding: 6px 14px; font-size: 12px; }
 
 /* Section headers */
-.section-head { font-size: 14px; font-weight: 700; font-family: var(--font-mono); padding-bottom: 6px; margin: 24px 0 12px; border-bottom: 2px solid; }
+.section-head { font-size: 12px; font-weight: 500; font-family: var(--font-mono); letter-spacing: 0.06em; padding-bottom: 6px; margin: 28px 0 12px; border-bottom: 1px solid; }
 
 /* Config */
 .config-section { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-bottom: 16px; }
 .config-header { padding: 10px 16px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
 .config-body { padding: 16px; }
-.kw-tag { font-size: 12px; padding: 4px 10px; border-radius: 14px; display: inline-flex; align-items: center; gap: 6px; margin: 3px; }
+.kw-tag { font-size: 12px; font-family: var(--font-body); padding: 4px 10px; border-radius: 14px; display: inline-flex; align-items: center; gap: 6px; margin: 3px; }
 .kw-remove { background: none; border: none; cursor: pointer; font-size: 14px; padding: 0; line-height: 1; opacity: 0.6; }
 .kw-remove:hover { opacity: 1; }
-input[type="text"], input[type="number"], input[type="email"] {
-  padding: 9px 12px; border-radius: 6px; border: 1px solid var(--border-strong); font-size: 13px;
-  width: 100%; outline: none; font-family: var(--font-mono); background: var(--card);
+input[type="text"], input[type="number"], input[type="email"], input[type="password"] {
+  padding: 9px 12px; border-radius: 6px; border: 1px solid var(--border-strong); font-size: 13.5px;
+  width: 100%; outline: none; font-family: var(--font-body); background: var(--card);
   transition: all 0.15s; color: var(--text);
 }
 input:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(19,78,74,0.08); }
@@ -161,10 +161,10 @@ input:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(19,78,74,0.0
 .icon-btn { background: none; border: 1px solid transparent; border-radius: 6px; width: 28px; height: 28px; cursor: pointer; color: var(--muted); font-size: 15px; line-height: 1; }
 .icon-btn:hover { border-color: var(--border-strong); background: var(--bg-alt); color: var(--navy); }
 .icon-btn.on { color: var(--gold); }
-.badge-new { display: inline-block; background: var(--rose); color: #fff; font-family: var(--font-mono); font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 4px; margin-right: 8px; vertical-align: 2px; letter-spacing: 0.04em; }
+.badge-new { display: inline-block; background: var(--rose); color: #fff; font-family: var(--font-mono); font-size: 10px; font-weight: 500; padding: 1px 6px; border-radius: 4px; margin-right: 8px; vertical-align: 2px; letter-spacing: 0.04em; }
 .list-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; }
 .seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: 8px; overflow: hidden; background: var(--card); }
-.seg-btn { border: none; background: none; padding: 7px 12px; font-family: var(--font-mono); font-size: 12px; cursor: pointer; color: var(--muted); }
+.seg-btn { border: none; background: none; padding: 7px 12px; font-family: var(--font-body); font-size: 12.5px; cursor: pointer; color: var(--muted); }
 .seg-btn span { opacity: 0.7; margin-left: 2px; }
 .seg-btn.active { background: var(--teal); color: #fff; }
 .seg-btn:not(.active):hover { background: var(--bg-alt); color: var(--navy); }
@@ -172,7 +172,23 @@ input:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(19,78,74,0.0
 .source-chip { font-family: var(--font-mono); font-size: 11px; padding: 3px 10px; border-radius: 10px; background: var(--bg-alt); color: var(--muted); }
 .source-chip.done { background: rgba(74,124,89,0.12); color: var(--sage); }
 .source-chip.error { background: rgba(153,27,27,0.08); color: var(--red); }
-.hint { font-size: 11px; color: var(--muted); font-weight: 400; display: block; margin-top: 2px; }
+.hint { font-size: 11.5px; color: var(--muted); font-weight: 400; display: block; margin-top: 2px; line-height: 1.45; }
+.hint a { color: var(--teal); }
+.cfg-card { display: grid; gap: 16px; }
+.cfg-card > * { min-width: 0; }
+.card-title { font-family: var(--font-head); font-size: 17px; font-weight: 600; color: var(--navy); letter-spacing: -0.01em; }
+.card-sub { font-family: var(--font-body); font-size: 11px; font-weight: 400; color: var(--muted); margin-left: 6px; letter-spacing: 0.02em; text-transform: uppercase; }
+.field { display: block; font-size: 12.5px; font-weight: 500; color: #334155; min-width: 0; }
+.field > input { margin-top: 6px; }
+.field > .seg { display: flex; width: fit-content; max-width: 100%; margin-top: 6px; }
+.grid-2, .grid-3 { display: grid; gap: 14px; }
+.grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 600px) { .grid-2, .grid-3 { grid-template-columns: minmax(0, 1fr); } }
+.row-inline { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.btn-gold { background: var(--gold); color: #fff; }
+.btn-gold:hover { background: #9c7a48; }
+input.mono { font-family: var(--font-mono); font-size: 12.5px; }
 @media (max-width: 600px) { .container { padding: 0 14px 60px; } .header { padding: 24px 14px 0; } .tab { padding: 9px 12px; } }
 </style>
 </head>
@@ -304,6 +320,7 @@ let state = {
   apiKey: "",
   geminiKey: "",
   geminiModel: "",
+  openalexKey: "",
   searchMode: "direct",
   message: null,
   kwSuggestions: null,
@@ -390,6 +407,7 @@ function loadState() {
     state.apiKey = localStorage.getItem("lm-apikey") || "";
     state.geminiKey = localStorage.getItem("lm-geminikey") || "";
     state.geminiModel = localStorage.getItem("lm-geminimodel") || "";
+    state.openalexKey = localStorage.getItem("lm-openalexkey") || "";
     state.searchMode = localStorage.getItem("lm-searchmode") || "direct";
     state.sortBy = localStorage.getItem("lm-sort") || "score";
   } catch(e) {
@@ -425,18 +443,27 @@ function saveResults(papers) {
 // ============================================================
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-// fetch with a timeout and retries on 429 / 5xx / network errors (honours Retry-After)
+// Hosts that refused us with 429 during the current search — skipped instead of waited on
+const rateLimitedHosts = new Set();
+const hostOf = url => { try { return new URL(url).host; } catch { return ""; } };
+
+// fetch with a timeout and retries on 429 / 5xx / network errors (honours short Retry-After)
 async function fetchWithRetry(url, opts = {}, { retries = 2, timeout = 25000, backoff = 1500 } = {}) {
+  const host = hostOf(url);
+  if (rateLimitedHosts.has(host)) return new Response(JSON.stringify({ error: "rate-limited earlier in this search" }), { status: 429 });
   for (let attempt = 0; ; attempt++) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeout);
     try {
       const r = await fetch(url, { ...opts, signal: ctrl.signal });
-      if ((r.status === 429 || r.status >= 500) && attempt < retries) {
+      if (r.status === 429) {
         const ra = parseFloat(r.headers.get("retry-after"));
-        await sleep(Number.isFinite(ra) ? Math.min(ra, 30) * 1000 : backoff * 2 ** attempt);
+        // A long (or daily-budget) limit won't clear by waiting — give up on this host for now
+        if (attempt >= retries || !(ra <= 20) && host === "api.openalex.org") { rateLimitedHosts.add(host); return r; }
+        await sleep(Number.isFinite(ra) ? Math.min(ra, 20) * 1000 : backoff * 2 ** attempt);
         continue;
       }
+      if (r.status >= 500 && attempt < retries) { await sleep(backoff * 2 ** attempt); continue; }
       return r;
     } catch (e) {
       const err = e.name === "AbortError" ? new Error(`timed out after ${Math.round(timeout / 1000)}s`) : e;
@@ -448,9 +475,17 @@ async function fetchWithRetry(url, opts = {}, { retries = 2, timeout = 25000, ba
 
 async function fetchJson(url, opts, cfg) {
   const r = await fetchWithRetry(url, opts, cfg);
+  if (r.status === 429 && hostOf(url) === "api.openalex.org") {
+    throw new Error(state.openalexKey
+      ? "OpenAlex budget for your API key is used up (resets at midnight UTC)"
+      : "OpenAlex free daily budget for your network is used up — add a free OpenAlex API key in Configure");
+  }
   if (!r.ok) throw new Error(r.status === 429 ? "rate-limited (429)" : `HTTP ${r.status}`);
   return r.json();
 }
+
+// OpenAlex auth: personal API key (own budget) if set, else the shared per-IP free budget
+const oaAuth = () => state.openalexKey ? `api_key=${encodeURIComponent(state.openalexKey)}` : `mailto=${MAILTO}`;
 
 // Run fn over items with at most `limit` in flight
 async function mapLimit(items, limit, fn) {
@@ -682,11 +717,11 @@ async function verifyAiPapers(papers, startDate) {
       let work = null;
       const doi = cleanDoi(p.doi || (String(p.url || "").match(/10\.\d{4,9}\/[^\s?#"]+/) || [])[0]);
       if (doi) {
-        const r = await fetchWithRetry(`https://api.openalex.org/works/https://doi.org/${doi}?mailto=${MAILTO}`, {}, { retries: 1 });
+        const r = await fetchWithRetry(`https://api.openalex.org/works/https://doi.org/${doi}?${oaAuth()}`, {}, { retries: 1 });
         if (r.ok) work = await r.json();
       }
       if (!work && p.title) {
-        const d = await fetchJson(`https://api.openalex.org/works?search=${encodeURIComponent(p.title.slice(0, 200))}&per_page=5&mailto=${MAILTO}`, {}, { retries: 1 });
+        const d = await fetchJson(`https://api.openalex.org/works?search=${encodeURIComponent(p.title.slice(0, 200))}&per_page=5&${oaAuth()}`, {}, { retries: 1 });
         work = (d.results || []).find(w => titlesMatch(w.title, p.title)) || null;
       }
       if (!work || !titlesMatch(work.title, p.title)) return null;
@@ -714,17 +749,22 @@ async function searchBiorxiv(startDate, endDate, profile) {
       url: item.doi ? `https://doi.org/${item.doi}` : "",
       source: "bioRxiv"
     }));
-  const page = cursor => fetchJson(`https://api.biorxiv.org/details/biorxiv/${startDate}/${endDate}/${cursor}`, {}, { retries: 3, timeout: 30000 });
-  const first = await page(0);
+  const page = cursor => fetchJson(`https://api.biorxiv.org/details/biorxiv/${startDate}/${endDate}/${cursor}`, {}, { retries: 1, timeout: 15000 });
+  const deadline = Date.now() + 60000;  // a slow bioRxiv must not stall the whole search
+  const first = await fetchJson(`https://api.biorxiv.org/details/biorxiv/${startDate}/${endDate}/0`, {}, { retries: 2, timeout: 20000 });
   const firstColl = first.collection || [];
   const msg = (first.messages || [{}])[0] || {};
   const total = Math.min(parseInt(msg.total) || firstColl.length, MAX_RECORDS);
   const step = parseInt(msg.count) || firstColl.length || 30;
   const cursors = [];
   for (let c = step; c < total; c += step) cursors.push(c);
-  const rest = await mapLimit(cursors, 6, async c => { try { return (await page(c)).collection || []; } catch(e) { console.warn("bioRxiv page", c, e); return []; } });
+  let skipped = 0;
+  const rest = await mapLimit(cursors, 6, async c => {
+    if (Date.now() > deadline) { skipped++; return []; }
+    try { return (await page(c)).collection || []; } catch(e) { console.warn("bioRxiv page", c, e); skipped++; return []; }
+  });
   const papers = toPapers(firstColl.concat(...rest));
-  papers._note = (parseInt(msg.total) || 0) > MAX_RECORDS ? `capped at ${MAX_RECORDS} of ${msg.total}` : "";
+  papers._note = skipped ? `${skipped} of ${cursors.length + 1} pages unavailable (slow server)` : (parseInt(msg.total) || 0) > MAX_RECORDS ? `capped at ${MAX_RECORDS} of ${msg.total}` : "";
   return papers;
 }
 
@@ -804,6 +844,7 @@ const oaShortId = id => String(id || "").replace(/.*\//, "");
 
 async function searchOpenAlex(terms, startDate, endDate, authors) {
   const papers = [];
+  let firstErr = null, okQueries = 0;
   const select = "id,doi,title,publication_date,authorships,primary_location,abstract_inverted_index,type";
   // Scholarly work types only — OpenAlex also indexes datasets, data-portal queries, paratext, etc.
   const dateFilter = `from_publication_date:${startDate},to_publication_date:${endDate},type:article|preprint|review|letter|book-chapter`;
@@ -815,9 +856,10 @@ async function searchOpenAlex(terms, startDate, endDate, authors) {
   for (let i = 0; i < phrases.length && batches.length < 10; i += 6) batches.push(phrases.slice(i, i + 6).join(" OR "));
   await mapLimit(batches, 3, async query => {
     try {
-      const data = await fetchJson(`https://api.openalex.org/works?filter=title_and_abstract.search:${encodeURIComponent(query)},${dateFilter}&per_page=100&select=${select}&mailto=${MAILTO}`);
+      const data = await fetchJson(`https://api.openalex.org/works?filter=title_and_abstract.search:${encodeURIComponent(query)},${dateFilter}&per_page=100&select=${select}&${oaAuth()}`);
       for (const work of (data.results || [])) papers.push(oaWorkToPaper(work));
-    } catch(e) { console.warn("OpenAlex keyword query failed:", e); }
+      okQueries++;
+    } catch(e) { console.warn("OpenAlex keyword query failed:", e); firstErr ||= e; }
   });
 
   // Strategy 2: AUTHOR ID search — exact disambiguation via OpenAlex Author IDs (no false positives)
@@ -828,10 +870,11 @@ async function searchOpenAlex(terms, startDate, endDate, authors) {
     const idFilter = batch.map(a => oaShortId(a.openalexId)).join("|");
     for (let pageNo = 1; pageNo <= 4; pageNo++) {
       try {
-        const data = await fetchJson(`https://api.openalex.org/works?filter=authorships.author.id:${idFilter},${dateFilter}&sort=publication_date:desc&per_page=100&page=${pageNo}&select=${select}&mailto=${MAILTO}`);
+        const data = await fetchJson(`https://api.openalex.org/works?filter=authorships.author.id:${idFilter},${dateFilter}&sort=publication_date:desc&per_page=100&page=${pageNo}&select=${select}&${oaAuth()}`);
         for (const work of (data.results || [])) papers.push(oaWorkToPaper(work));
+        okQueries++;
         if ((data.results || []).length < 100) break;
-      } catch(e) { console.warn("OpenAlex author ID query failed:", e); break; }
+      } catch(e) { console.warn("OpenAlex author ID query failed:", e); firstErr ||= e; break; }
     }
   });
 
@@ -842,10 +885,13 @@ async function searchOpenAlex(terms, startDate, endDate, authors) {
   await mapLimit(nameBatches, 2, async batch => {
     const q = batch.map(a => `"${`${a.first || ""} ${a.last}`.trim().replace(/[",|]/g, " ")}"`).join(" OR ");
     try {
-      const data = await fetchJson(`https://api.openalex.org/works?filter=raw_author_name.search:${encodeURIComponent(q)},${dateFilter}&per_page=100&select=${select}&mailto=${MAILTO}`);
+      const data = await fetchJson(`https://api.openalex.org/works?filter=raw_author_name.search:${encodeURIComponent(q)},${dateFilter}&per_page=100&select=${select}&${oaAuth()}`);
       for (const work of (data.results || [])) papers.push(oaWorkToPaper(work));
-    } catch(e) { console.warn("OpenAlex author name query failed:", e); }
+      okQueries++;
+    } catch(e) { console.warn("OpenAlex author name query failed:", e); firstErr ||= e; }
   });
+  if (!okQueries && firstErr) throw firstErr;
+  if (firstErr) papers._note = "some queries failed";
   return papers;
 }
 
@@ -856,7 +902,7 @@ async function lookupAuthorId(query, affiliation) {
 
   // Strategy 1: Autocomplete API (fast, good for common names)
   try {
-    const data = await fetchJson(`https://api.openalex.org/autocomplete/authors?q=${encodeURIComponent(query)}&mailto=${MAILTO}`, {}, { retries: 1 });
+    const data = await fetchJson(`https://api.openalex.org/autocomplete/authors?q=${encodeURIComponent(query)}&${oaAuth()}`, {}, { retries: 1 });
     results = (data.results || []).map(item => ({
       id: item.id,
       shortId: oaShortId(item.id),
@@ -871,7 +917,7 @@ async function lookupAuthorId(query, affiliation) {
   // Strategy 2: Full authors search (more comprehensive, catches names autocomplete misses)
   if (results.length < 3) {
     try {
-      const data = await fetchJson(`https://api.openalex.org/authors?search=${encodeURIComponent(query)}&per_page=10&mailto=${MAILTO}`, {}, { retries: 1 });
+      const data = await fetchJson(`https://api.openalex.org/authors?search=${encodeURIComponent(query)}&per_page=10&${oaAuth()}`, {}, { retries: 1 });
       const seenIds = new Set(results.map(r => r.id));
       for (const item of (data.results || [])) {
         if (seenIds.has(item.id)) continue;
@@ -1238,6 +1284,7 @@ async function runSearch() {
     render(); return;
   }
   state.searching = true; state.message = null; state.pipelineInfo = null;
+  rateLimitedHosts.clear();
   const searchStart = performance.now();
   const end = new Date(), start = new Date(end - p.lookbackDays * 864e5);
   const ds = d => d.toISOString().split("T")[0];
@@ -1840,7 +1887,7 @@ function renderListBar(visible) {
     h += `<button class="seg-btn ${state.listMode === mode ? "active" : ""}" data-list-mode="${mode}">${labels[mode]} <span>${counts[mode]}</span></button>`;
   }
   h += `</div>`;
-  h += `<input type="text" id="filter-input" placeholder="Filter by word, author, journal…" value="${esc(state.filterText)}" style="flex:1;min-width:160px;width:auto">`;
+  h += `<input type="text" id="filter-input" placeholder="Filter…" title="Filter by word, author or journal" value="${esc(state.filterText)}" style="flex:1 1 120px;min-width:120px;width:auto;padding:7px 12px">`;
   h += `<button class="btn btn-secondary btn-sm" id="btn-toggle-sort" title="Toggle sort order">Sort: ${state.sortBy === "score" ? "Score" : "Date"}</button>`;
   if (visible.length) {
     h += `<button class="btn btn-secondary btn-sm" id="btn-copy" title="Copy a plain-text digest of the papers shown">📋 Digest</button>`;
@@ -1862,45 +1909,50 @@ function renderConfig() {
   }
   h += `<p style="font-size:13px;color:var(--muted);margin-bottom:16px;font-family:var(--font-mono)">Edit topics, authors, scoring. Lab mates: create a new profile for your field.</p>`;
 
-  // Basics
-  h += `<div class="card" style="display:grid;gap:10px">`;
-  h += `<label style="font-size:12px;font-weight:600">Profile Name<input type="text" id="cfg-name" value="${esc(state.nameInput ?? p.name)}" placeholder="e.g. XNH Connectomics" style="margin-top:4px"></label>`;
-  h += `<label style="font-size:12px;font-weight:600">Description<input type="text" id="cfg-desc" value="${esc(p.description)}" placeholder="One sentence on your research area — used by AI keyword suggestions and AI search" style="margin-top:4px"></label>`;
-  h += `<div style="display:flex;gap:8px;align-items:center">`;
-  h += `<button class="btn btn-sm" id="btn-ai-suggest-kw" onclick="aiSuggestKeywords()" style="background:var(--gold);color:#fff;justify-self:start">✨ AI Suggest Keywords</button>`;
-  if (!state.geminiKey) h += `<span style="font-size:10px;color:var(--muted)">Add Gemini key below to enable</span>`;
-  h += `</div>`;
-  h += `<div class="flex gap-2">`;
-  h += `<div class="flex gap-2" style="flex-wrap:wrap">`;
-  h += `<label style="font-size:12px;font-weight:600;flex:1;min-width:120px">Lookback (days)<input type="number" id="cfg-days" value="${p.lookbackDays}" min="1" max="90" style="margin-top:4px"></label>`;
-  h += `<label style="font-size:12px;font-weight:600;flex:1;min-width:120px">Min Score<input type="number" id="cfg-minscore" value="${p.minScore}" min="0" max="50" style="margin-top:4px"></label>`;
-  h += `<label style="font-size:12px;font-weight:600;flex:1;min-width:120px">Author Score<input type="number" id="cfg-authscore" value="${p.authorScore}" min="0" max="50" style="margin-top:4px"></label>`;
-  h += `</div>`;
-  h += `<label style="font-size:12px;font-weight:600">Extra broad search terms <span class="hint">Short terms sent to the databases to widen recall (comma-separated). Not used for scoring — papers still need a tier keyword or watched author.</span><input type="text" id="cfg-extraterms" value="${esc(p.extraSearchTerms || "")}" placeholder="e.g. holotomography, ptychography" style="margin-top:4px"></label>`;
-  h += `<label style="font-size:12px;font-weight:600">bioRxiv categories to scan <span class="hint">Every new preprint in these subjects is scored (comma-separated, lowercase as on bioRxiv). Leave empty to scan all subjects (slower).</span><input type="text" id="cfg-biorxiv" value="${esc(p.biorxivCategories || "")}" placeholder="neuroscience, biophysics, bioengineering" style="margin-top:4px"></label>`;
+  // Profile basics
+  h += `<div class="card cfg-card">`;
+  h += `<div class="card-title">Profile</div>`;
+  h += `<label class="field">Name<input type="text" id="cfg-name" value="${esc(state.nameInput ?? p.name)}" placeholder="e.g. XNH Connectomics"></label>`;
+  h += `<label class="field">Description<span class="hint">One sentence on your research area — used by AI keyword suggestions and AI search.</span><input type="text" id="cfg-desc" value="${esc(p.description)}" placeholder="e.g. X-ray nanoholotomography for connectomics"></label>`;
+  h += `<div class="row-inline">`;
+  h += `<button class="btn btn-sm btn-gold" id="btn-ai-suggest-kw" onclick="aiSuggestKeywords()">✨ AI Suggest Keywords</button>`;
+  if (!state.geminiKey) h += `<span class="hint" style="margin:0">Needs a Gemini key (see AI below)</span>`;
+  h += `</div></div>`;
 
-  // Search mode
-  h += `<label style="font-size:12px;font-weight:600">Search Mode</label>`;
-  h += `<div class="flex gap-2" style="flex-wrap:wrap">`;
+  // Search settings
+  h += `<div class="card cfg-card">`;
+  h += `<div class="card-title">Search &amp; scoring</div>`;
+  h += `<div class="grid-3">`;
+  h += `<label class="field">Lookback (days)<input type="number" id="cfg-days" value="${p.lookbackDays}" min="1" max="90"></label>`;
+  h += `<label class="field">Min score<input type="number" id="cfg-minscore" value="${p.minScore}" min="0" max="50"></label>`;
+  h += `<label class="field">Author score<input type="number" id="cfg-authscore" value="${p.authorScore}" min="0" max="50"></label>`;
+  h += `</div>`;
+  h += `<label class="field">Extra broad search terms<span class="hint">Short terms sent to the databases to widen recall (comma-separated). Not used for scoring — papers still need a tier keyword or a watched author.</span><input type="text" id="cfg-extraterms" value="${esc(p.extraSearchTerms || "")}" placeholder="e.g. holotomography, ptychography"></label>`;
+  h += `<label class="field">OpenAlex API key <span class="card-sub" style="margin-left:4px">recommended</span><span class="hint">Free from <a href="https://openalex.org" target="_blank" rel="noopener">openalex.org</a> (sign in → API key). Without one, everyone on your network shares a small daily budget, which can run out.</span><input type="password" class="mono" autocomplete="off" id="cfg-openalexkey" value="${esc(state.openalexKey)}" placeholder="optional"></label>`;
+  h += `<label class="field">bioRxiv categories to scan<span class="hint">Every new preprint in these subjects is scored (comma-separated, as named on bioRxiv). Leave empty to scan all subjects (slower).</span><input type="text" id="cfg-biorxiv" value="${esc(p.biorxivCategories || "")}" placeholder="neuroscience, biophysics, bioengineering"></label>`;
+  h += `</div>`;
+
+  // AI search + keys
+  h += `<div class="card cfg-card">`;
+  h += `<div class="card-title">AI assistance <span class="card-sub">optional</span></div>`;
+  h += `<div class="field">Search mode<div class="seg" style="flex-wrap:wrap">`;
+  const modeLabels = { direct: "Databases only", gemini: "+ Gemini", anthropic: "+ Claude", both: "+ Gemini & Claude" };
   ["direct","gemini","anthropic","both"].forEach(m => {
-    const labels = { direct: "Direct APIs (no key)", gemini: "Direct + Gemini", anthropic: "Direct + Claude", both: "All sources" };
-    h += `<label style="font-size:11px;cursor:pointer;padding:6px 12px;border-radius:6px;border:1px solid var(--border);background:${state.searchMode===m?"var(--teal)":"var(--card)"};color:${state.searchMode===m?"#fff":"var(--text)"};transition:all 0.15s"><input type="radio" name="searchmode" value="${m}" ${state.searchMode===m?"checked":""} style="display:none"> ${labels[m]}</label>`;
+    h += `<label class="seg-btn ${state.searchMode===m?"active":""}"><input type="radio" name="searchmode" value="${m}" ${state.searchMode===m?"checked":""} hidden>${modeLabels[m]}</label>`;
   });
+  h += `</div></div>`;
+  h += `<div class="grid-2">`;
+  h += `<label class="field">Gemini API key<span class="hint">Free from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com</a></span><input type="password" class="mono" autocomplete="off" id="cfg-geminikey" value="${esc(state.geminiKey)}" placeholder="AIza…"></label>`;
+  h += `<label class="field">Gemini model<span class="hint">Falls back to “${GEMINI_FALLBACK_MODEL}” if retired</span><input type="text" class="mono" id="cfg-geminimodel" value="${esc(state.geminiModel)}" placeholder="${DEFAULT_GEMINI_MODEL}"></label>`;
   h += `</div>`;
-
-  // API keys
-  h += `<div style="margin-top:10px">`;
-  h += `<label style="font-size:12px;font-weight:600">Gemini API Key <span style="color:var(--muted);font-weight:400">(free from <a href="https://aistudio.google.com/apikey" target="_blank" style="color:var(--teal)">aistudio.google.com</a> — also powers paper reviews)</span><input type="password" autocomplete="off" id="cfg-geminikey" value="${esc(state.geminiKey)}" placeholder="AIza..." style="margin-top:4px"></label>`;
-  h += `<label style="font-size:12px;font-weight:600;display:block;margin-top:8px">Gemini model <span class="hint">Google retires model IDs regularly; if a model disappears the app falls back to "${GEMINI_FALLBACK_MODEL}".</span><input type="text" id="cfg-geminimodel" value="${esc(state.geminiModel)}" placeholder="${DEFAULT_GEMINI_MODEL}" style="margin-top:4px"></label>`;
-  h += `</div>`;
-  h += `<label style="font-size:12px;font-weight:600">Anthropic API Key <span style="color:var(--muted);font-weight:400">(optional, from <a href="https://console.anthropic.com" target="_blank" style="color:var(--teal)">console.anthropic.com</a> — billed separately from Claude Team/Pro plans; used for Claude search and reviews)</span><input type="password" autocomplete="off" id="cfg-apikey" value="${esc(state.apiKey)}" placeholder="sk-ant-..." style="margin-top:4px"></label>`;
-  h += `<div class="hint">Keys are stored only in this browser (localStorage) and sent only to Google / Anthropic.</div>`;
+  h += `<label class="field">Anthropic API key<span class="hint">From <a href="https://console.anthropic.com" target="_blank" rel="noopener">console.anthropic.com</a> — billed separately from Claude Team/Pro plans. Used for Claude search and reviews.</span><input type="password" class="mono" autocomplete="off" id="cfg-apikey" value="${esc(state.apiKey)}" placeholder="sk-ant-…"></label>`;
+  h += `<div class="hint" style="margin:0">Keys stay in this browser (localStorage) and are only sent to Google / Anthropic.</div>`;
   h += `</div>`;
 
   // Show AI suggestions if available
   if (state.kwSuggestions) {
     h += `<div class="card" style="border:2px solid var(--gold);margin-bottom:16px">`;
-    h += `<div style="font-weight:700;color:var(--navy);font-size:14px;margin-bottom:10px">✨ AI Keyword Suggestions</div>`;
+    h += `<div class="card-title" style="margin-bottom:8px">✨ AI keyword suggestions</div>`;
     h += `<div style="font-size:12px;color:var(--muted);margin-bottom:12px">Click a keyword to add it to the tier. Click "Dismiss" when done.</div>`;
     for (const [tierKey, suggestions] of Object.entries(state.kwSuggestions)) {
       const tier = p.tiers[tierKey];
@@ -1924,7 +1976,7 @@ function renderConfig() {
   for (const [tierKey, tier] of Object.entries(p.tiers)) {
     h += `<div class="config-section">`;
     h += `<div class="config-header" style="background:${tier.color}10">`;
-    h += `<span style="font-weight:700;color:${tier.color};font-size:13px">${esc(tier.label)} <span style="font-weight:400;color:var(--muted);font-size:11px">+${tier.score}pts · ${tier.keywords.length} keywords</span></span>`;
+    h += `<span style="font-weight:600;color:${tier.color};font-size:13px">${esc(tier.label)} <span style="font-weight:400;color:var(--muted);font-size:11px">+${tier.score}pts · ${tier.keywords.length} keywords</span></span>`;
     h += `</div><div class="config-body">`;
     h += `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px">`;
     tier.keywords.forEach((kw, i) => {
@@ -1938,7 +1990,7 @@ function renderConfig() {
   // Authors
   h += `<div class="config-section">`;
   h += `<div class="config-header" style="background:color-mix(in srgb, var(--purple) 6%, transparent)">`;
-  h += `<span style="font-weight:700;color:var(--purple);font-size:13px">Watched Authors <span style="font-weight:400;color:var(--muted);font-size:11px">+${p.authorScore}pts · ${p.authors.length} authors</span></span>`;
+  h += `<span style="font-weight:600;color:var(--purple);font-size:13px">Watched Authors <span style="font-weight:400;color:var(--muted);font-size:11px">+${p.authorScore}pts · ${p.authors.length} authors</span></span>`;
   h += `</div><div class="config-body" style="max-height:350px;overflow-y:auto">`;
   // Info banner about OpenAlex IDs
   const authorsWithIds = p.authors.filter(a => a.openalexId).length;
@@ -1953,7 +2005,7 @@ function renderConfig() {
     const idBadge = a.openalexId
       ? `<a href="${esc(safeUrl(a.openalexId))}" target="_blank" rel="noopener" style="background:#ecfdf5;color:var(--green);padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;font-family:var(--font-mono);text-decoration:none" title="Linked to OpenAlex ${esc(oaShortId(a.openalexId))} — click to check the profile">✓ ${esc(oaShortId(a.openalexId))}</a><button class="btn-find-id" data-find-id="${i}" title="Pick a different OpenAlex author" style="background:none;border:1px solid var(--border);color:var(--muted);padding:2px 6px;border-radius:10px;font-size:10px;cursor:pointer">change</button>`
       : `<button class="btn-find-id" data-find-id="${i}" style="background:#fffbeb;color:var(--amber);border:1px solid #fde68a;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;font-family:var(--font-mono);cursor:pointer">🔍 Find ID</button>`;
-    h += `<div class="author-row"><span style="font-weight:600;min-width:130px">${esc(a.last)}, ${esc(a.first)}${a.middle ? " "+esc(a.middle).charAt(0)+"." : ""}</span><span style="color:var(--muted);font-size:11px;flex:1">${esc(a.aff)} — ${esc(a.note)}</span>${idBadge}<button class="kw-remove" data-rm-author="${i}">×</button></div>`;
+    h += `<div class="author-row"><span style="font-weight:500;min-width:130px">${esc(a.last)}, ${esc(a.first)}${a.middle ? " "+esc(a.middle).charAt(0)+"." : ""}</span><span style="color:var(--muted);font-size:11px;flex:1">${esc(a.aff)} — ${esc(a.note)}</span>${idBadge}<button class="kw-remove" data-rm-author="${i}">×</button></div>`;
 
     // Show lookup candidates inline if this author is being looked up
     if (state.idLookup?.authorIdx === i) {
@@ -2131,7 +2183,7 @@ function handleClick(e) {
       const idx = state.profile.authors.length - 1;
       state.message = { type: "info", text: `Resolving ORCID ${orcidMatch[1]}…` };
       render();
-      fetch(`https://api.openalex.org/authors/orcid:${orcidMatch[1]}?mailto=lit-monitor@research.org`)
+      fetch(`https://api.openalex.org/authors/orcid:${orcidMatch[1]}?${oaAuth()}`)
         .then(r => r.ok ? r.json() : Promise.reject("Not found"))
         .then(data => {
           if (data.id) {
@@ -2211,7 +2263,7 @@ function handleClick(e) {
       // Resolve ORCID → OpenAlex ID
       state.message = { type: "info", text: `Resolving ORCID ${orcidMatch[1]}…` };
       render();
-      fetch(`https://api.openalex.org/authors/orcid:${orcidMatch[1]}?mailto=lit-monitor@research.org`)
+      fetch(`https://api.openalex.org/authors/orcid:${orcidMatch[1]}?${oaAuth()}`)
         .then(r => r.ok ? r.json() : Promise.reject("Not found"))
         .then(data => {
           if (data.id) {
@@ -2369,6 +2421,7 @@ function handleInput(e) {
     case "cfg-biorxiv":    state.profile.biorxivCategories = t.value; break;
     case "cfg-apikey":     state.apiKey = t.value.trim(); try { localStorage.setItem("lm-apikey", state.apiKey); } catch {} return;
     case "cfg-geminikey":  state.geminiKey = t.value.trim(); try { localStorage.setItem("lm-geminikey", state.geminiKey); } catch {} return;
+    case "cfg-openalexkey": state.openalexKey = t.value.trim(); try { localStorage.setItem("lm-openalexkey", state.openalexKey); } catch {} return;
     case "cfg-geminimodel": state.geminiModel = t.value.trim(); try { localStorage.setItem("lm-geminimodel", state.geminiModel); } catch {} return;
     case "cfg-email-recipients": state.profile.emailRecipients = t.value; break;
     case "filter-input":   state.filterText = t.value; render(); return;
