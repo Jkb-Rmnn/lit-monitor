@@ -155,6 +155,25 @@ input:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(19,78,74,0.0
 .btn-review:hover { border-color: var(--teal); color: var(--teal); background: rgba(19,78,74,0.05); }
 .lookup-candidate:hover { border-color: var(--teal) !important; background: rgba(19,78,74,0.05) !important; transform: translateX(2px); }
 .btn-find-id:hover { background: rgba(176,141,87,0.2) !important; }
+.paper-head { display: flex; gap: 10px; align-items: flex-start; }
+.paper-head .paper-title { flex: 1; min-width: 0; }
+.paper-actions { display: flex; gap: 4px; flex-shrink: 0; }
+.icon-btn { background: none; border: 1px solid transparent; border-radius: 6px; width: 28px; height: 28px; cursor: pointer; color: var(--muted); font-size: 15px; line-height: 1; }
+.icon-btn:hover { border-color: var(--border-strong); background: var(--bg-alt); color: var(--navy); }
+.icon-btn.on { color: var(--gold); }
+.badge-new { display: inline-block; background: var(--rose); color: #fff; font-family: var(--font-mono); font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 4px; margin-right: 8px; vertical-align: 2px; letter-spacing: 0.04em; }
+.list-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; }
+.seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: 8px; overflow: hidden; background: var(--card); }
+.seg-btn { border: none; background: none; padding: 7px 12px; font-family: var(--font-mono); font-size: 12px; cursor: pointer; color: var(--muted); }
+.seg-btn span { opacity: 0.7; margin-left: 2px; }
+.seg-btn.active { background: var(--teal); color: #fff; }
+.seg-btn:not(.active):hover { background: var(--bg-alt); color: var(--navy); }
+.source-grid { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-top: 14px; }
+.source-chip { font-family: var(--font-mono); font-size: 11px; padding: 3px 10px; border-radius: 10px; background: var(--bg-alt); color: var(--muted); }
+.source-chip.done { background: rgba(74,124,89,0.12); color: var(--sage); }
+.source-chip.error { background: rgba(153,27,27,0.08); color: var(--red); }
+.hint { font-size: 11px; color: var(--muted); font-weight: 400; display: block; margin-top: 2px; }
+@media (max-width: 600px) { .container { padding: 0 14px 60px; } .header { padding: 24px 14px 0; } .tab { padding: 9px 12px; } }
 </style>
 </head>
 <body>
@@ -263,6 +282,10 @@ const DEFAULT_PROFILE = {
     {last:"Lohse",first:"Leon",middle:"Merten",aff:"U. Göttingen",note:"HoToPy"},
     {last:"Kornfeld",first:"Jörgen",aff:"Various",note:"EM connectomics"}
   ],
+  // bioRxiv subject categories to scan in full (comma-separated; empty = all categories)
+  biorxivCategories: "neuroscience, biophysics, bioengineering, cell biology, bioinformatics",
+  // Short, broad terms sent to the databases in addition to the tier keywords (not used for scoring)
+  extraSearchTerms: "nanoholotomography, holotomography, nanotomography, ptychography, X-ray connectomics, synchrotron brain imaging",
   emailRecipients: ""
 };
 
@@ -280,22 +303,67 @@ let state = {
   view: "results",
   apiKey: "",
   geminiKey: "",
+  geminiModel: "",
   searchMode: "direct",
   message: null,
   kwSuggestions: null,
   sortBy: "score",  // "score" or "date"
   isDraft: false,  // True when creating a new profile that hasn't been saved yet
-  idLookup: null  // { authorIdx, loading, candidates }
+  idLookup: null,  // { authorIdx, loading, candidates }
+  nameInput: null, // Pending profile name edit (applied on Save, so renames can't half-happen)
+  marks: { seen: {}, starred: {}, hidden: {} },  // Per-profile paper tracking, keyed by paperKey()
+  filterText: "",
+  listMode: "all"  // "all" | "new" | "starred" | "hidden"
 };
+
+const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash";
+const GEMINI_FALLBACK_MODEL = "gemini-flash-latest";
+const CLAUDE_MODEL = "claude-opus-5-5";
+const MAILTO = "lit-monitor@research.org";
+
+// localStorage helpers — never let a quota/privacy error break the app
+function lsGet(key, fallback = null) {
+  try { const v = localStorage.getItem(key); return v == null ? fallback : JSON.parse(v); } catch { return fallback; }
+}
+function lsSet(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); return true; }
+  catch(e) { console.warn("localStorage write failed:", key, e); return false; }
+}
+
+// Stable identity for a paper across searches and sources
+function paperKey(p) {
+  if (p.doi) return "doi:" + String(p.doi).toLowerCase().replace(/^https?:\/\/(dx\.)?doi\.org\//, "").trim();
+  return "t:" + (p.title || "").toLowerCase().normalize("NFKD").replace(/[^a-z0-9]/g, "").slice(0, 80);
+}
+
+function loadMarks(name) {
+  const m = lsGet("lm-m:" + name, null) || {};
+  return { seen: m.seen || {}, starred: m.starred || {}, hidden: m.hidden || {} };
+}
+function saveMarks() {
+  if (state.isDraft || !state.activeProfile) return;
+  lsSet("lm-m:" + state.activeProfile, state.marks);
+}
+
+// Normalise a stored profile so older saves keep working
+function upgradeProfile(p) {
+  if (!p) return p;
+  p.tiers = p.tiers || {};
+  for (const t of Object.values(p.tiers)) t.keywords = t.keywords || [];
+  p.authors = p.authors || [];
+  if (p.biorxivCategories == null) p.biorxivCategories = p.name === DEFAULT_PROFILE.name ? DEFAULT_PROFILE.biorxivCategories : "";
+  if (p.extraSearchTerms == null) p.extraSearchTerms = p.name === DEFAULT_PROFILE.name ? DEFAULT_PROFILE.extraSearchTerms : "";
+  return p;
+}
 
 function loadState() {
   try {
-    const profiles = JSON.parse(localStorage.getItem("lm-profiles") || "null");
+    const profiles = lsGet("lm-profiles", null);
     const active = localStorage.getItem("lm-active");
     if (profiles && profiles.length > 0) {
       state.profiles = profiles;
-      state.activeProfile = active || profiles[0];
-      state.profile = JSON.parse(localStorage.getItem("lm-p:" + state.activeProfile) || "null");
+      state.activeProfile = profiles.includes(active) ? active : profiles[0];
+      state.profile = upgradeProfile(lsGet("lm-p:" + state.activeProfile, null));
       // Migration: update old tier colors to new palette
       if (state.profile?.tiers) {
         const migrations = {
@@ -307,44 +375,149 @@ function loadState() {
         for (const tier of Object.values(state.profile.tiers)) {
           if (migrations[tier.color]) { tier.color = migrations[tier.color]; migrated = true; }
         }
-        if (migrated) localStorage.setItem("lm-p:" + state.activeProfile, JSON.stringify(state.profile));
+        if (migrated) lsSet("lm-p:" + state.activeProfile, state.profile);
       }
-      const r = JSON.parse(localStorage.getItem("lm-r:" + state.activeProfile) || "null");
+      const r = lsGet("lm-r:" + state.activeProfile, null);
       if (r) { state.results = r.papers; state.searchDate = r.date; }
     }
     if (!state.profile) {
-      state.profile = JSON.parse(JSON.stringify(DEFAULT_PROFILE));
+      state.profile = upgradeProfile(JSON.parse(JSON.stringify(DEFAULT_PROFILE)));
       state.activeProfile = DEFAULT_PROFILE.name;
       state.profiles = [DEFAULT_PROFILE.name];
       saveProfile(state.profile);
     }
+    state.marks = loadMarks(state.activeProfile);
     state.apiKey = localStorage.getItem("lm-apikey") || "";
     state.geminiKey = localStorage.getItem("lm-geminikey") || "";
-  } catch(e) { console.error("Load error:", e); state.profile = JSON.parse(JSON.stringify(DEFAULT_PROFILE)); }
+    state.geminiModel = localStorage.getItem("lm-geminimodel") || "";
+    state.searchMode = localStorage.getItem("lm-searchmode") || "direct";
+    state.sortBy = localStorage.getItem("lm-sort") || "score";
+  } catch(e) {
+    console.error("Load error:", e);
+    state.profile = upgradeProfile(JSON.parse(JSON.stringify(DEFAULT_PROFILE)));
+    state.activeProfile = DEFAULT_PROFILE.name;
+    state.profiles = [DEFAULT_PROFILE.name];
+  }
 }
 
+// Persists the active profile. Drafts are never persisted until the user saves them explicitly.
 function saveProfile(p) {
   p = p || state.profile;
-  localStorage.setItem("lm-p:" + p.name, JSON.stringify(p));
+  if (state.isDraft || !p.name) return;
+  lsSet("lm-p:" + p.name, p);
   if (!state.profiles.includes(p.name)) state.profiles.push(p.name);
-  localStorage.setItem("lm-profiles", JSON.stringify(state.profiles));
+  lsSet("lm-profiles", state.profiles);
   localStorage.setItem("lm-active", p.name);
 }
 
 function saveResults(papers) {
   const data = { papers, date: new Date().toISOString() };
-  localStorage.setItem("lm-r:" + state.activeProfile, JSON.stringify(data));
   state.searchDate = data.date;
+  if (state.isDraft) return;
+  if (!lsSet("lm-r:" + state.activeProfile, data)) {
+    // Quota exceeded — retry without abstracts so results at least survive a reload
+    lsSet("lm-r:" + state.activeProfile, { ...data, papers: papers.map(p => ({ ...p, abstract: (p.abstract || "").slice(0, 400) })) });
+  }
 }
 
 // ============================================================
-// API SEARCH FUNCTIONS
+// NETWORK HELPERS
+// ============================================================
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// fetch with a timeout and retries on 429 / 5xx / network errors (honours Retry-After)
+async function fetchWithRetry(url, opts = {}, { retries = 2, timeout = 25000, backoff = 1500 } = {}) {
+  for (let attempt = 0; ; attempt++) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeout);
+    try {
+      const r = await fetch(url, { ...opts, signal: ctrl.signal });
+      if ((r.status === 429 || r.status >= 500) && attempt < retries) {
+        const ra = parseFloat(r.headers.get("retry-after"));
+        await sleep(Number.isFinite(ra) ? Math.min(ra, 30) * 1000 : backoff * 2 ** attempt);
+        continue;
+      }
+      return r;
+    } catch (e) {
+      const err = e.name === "AbortError" ? new Error(`timed out after ${Math.round(timeout / 1000)}s`) : e;
+      if (attempt >= retries) throw err;
+      await sleep(backoff * 2 ** attempt);
+    } finally { clearTimeout(timer); }
+  }
+}
+
+async function fetchJson(url, opts, cfg) {
+  const r = await fetchWithRetry(url, opts, cfg);
+  if (!r.ok) throw new Error(r.status === 429 ? "rate-limited (429)" : `HTTP ${r.status}`);
+  return r.json();
+}
+
+// Run fn over items with at most `limit` in flight
+async function mapLimit(items, limit, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) { const i = next++; results[i] = await fn(items[i], i); }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+const cleanDoi = d => String(d || "").toLowerCase().replace(/^https?:\/\/(dx\.)?doi\.org\//, "").replace(/[.,;)\]]+$/, "").trim();
+const stripTags = s => String(s || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+const pad2 = n => String(n).padStart(2, "0");
+const MONTHS = { jan:1, feb:2, mar:3, apr:4, may:5, jun:6, jul:7, aug:8, sep:9, oct:10, nov:11, dec:12 };
+// Build an ISO-ish date (YYYY, YYYY-MM or YYYY-MM-DD) from loose parts so dates sort correctly
+function isoDate(y, m, d) {
+  if (!y) return "";
+  let mm = m == null || m === "" ? null : (MONTHS[String(m).slice(0, 3).toLowerCase()] || parseInt(m));
+  if (!mm) return String(y);
+  return d ? `${y}-${pad2(mm)}-${pad2(parseInt(d))}` : `${y}-${pad2(mm)}`;
+}
+
+// Convert "Last, F. M.; Last2, A." (bioRxiv) or "Last FM, Last2 A" (Europe PMC/PubMed style)
+// into "F. M. Last, A. Last2" so every source uses the same first-name-first order for author matching.
+function normalizeAuthorList(str, style) {
+  const parts = style === "semicolon" ? String(str || "").split(/\s*;\s*/) : String(str || "").replace(/\.$/, "").split(/\s*,\s*/);
+  return parts.map(a => {
+    a = a.trim();
+    if (!a) return "";
+    let last, init;
+    if (style === "semicolon") {
+      const m = a.match(/^([^,]+),\s*(.+)$/);
+      if (!m) return a;
+      [, last, init] = m;
+      // "F. M." stays; full forenames ("Nicola") stay as written
+      return `${init.trim()} ${last.trim()}`;
+    }
+    const m = a.match(/^(.+?)\s+([A-Z]{1,4})$/);   // "Pelt DM" → initials "DM"
+    if (!m) return a;
+    [, last, init] = m;
+    return `${init.split("").map(c => c + ".").join(" ")} ${last}`;
+  }).filter(Boolean).join(", ");
+}
+
+// Search terms sent to the databases: tier keywords + the profile's extra broad terms.
+// (Scoring always uses the tier keywords, so broad terms only widen recall.)
+function splitList(s) { return String(s || "").split(/[,;\n]/).map(x => x.trim()).filter(Boolean); }
+function searchTerms(profile, { t2 = Infinity, t3 = 0 } = {}) {
+  const tiers = profile.tiers || {};
+  return [...new Set([
+    ...splitList(profile.extraSearchTerms),
+    ...(tiers.tier1?.keywords || []),
+    ...(tiers.tier2?.keywords || []).slice(0, t2),
+    ...(tiers.tier3?.keywords || []).slice(0, t3)
+  ].map(s => s.trim()).filter(Boolean))];
+}
+
+// ============================================================
+// LLM SEARCH (optional add-on to the direct database APIs)
 // ============================================================
 const SEARCH_SYSTEM = `You are a scientific literature search tool. Find REAL papers published recently.
 
 ABSOLUTE RULES:
 1. ONLY report papers found via web search. NEVER fabricate papers.
-2. Every paper MUST have a real URL from search results.
+2. Every paper MUST have a real URL from search results. Include the DOI whenever one exists.
 3. If zero papers found, return exactly: []
 4. NEVER invent titles, authors, DOIs, or URLs.
 5. Only include papers published within the specified date range.
@@ -354,41 +527,66 @@ Return ONLY a JSON array. No markdown, no prose.
 Format: [{"title":"...","authors":"...","date":"YYYY-MM-DD","url":"...","source":"...","abstract":"...","doi":"..."}]
 Empty: []`;
 
+let claudeFallbackHeaderOK = true;
+async function callClaude(prompt, system, apiKey, { effort = "low", maxTokens = 16000 } = {}) {
+  const messages = [{ role: "user", content: prompt }];
+  let text = "";
+  // Server-side web search can pause long turns (stop_reason "pause_turn"); resume up to 3 times
+  for (let turn = 0; turn < 4; turn++) {
+    const headers = { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" };
+    const body = { model: CLAUDE_MODEL, max_tokens: maxTokens, system, messages, output_config: { effort },
+      tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 8 }] };
+    if (claudeFallbackHeaderOK) { headers["anthropic-beta"] = "server-side-fallback-2026-07-01"; body.fallbacks = "default"; }
+    let r;
+    try {
+      r = await fetchWithRetry("https://api.anthropic.com/v1/messages", { method: "POST", headers, body: JSON.stringify(body) }, { retries: 2, timeout: 300000, backoff: 4000 });
+    } catch (e) {
+      // If the browser rejected the beta header (CORS), retry once without the refusal-fallback feature
+      if (claudeFallbackHeaderOK && e instanceof TypeError) { claudeFallbackHeaderOK = false; turn--; continue; }
+      throw e;
+    }
+    const data = await r.json().catch(() => ({}));
+    if (data.error) throw new Error(data.error.message || `Anthropic API error (HTTP ${r.status})`);
+    if (data.stop_reason === "refusal") throw new Error("Claude declined this request" + (data.stop_details?.explanation ? `: ${data.stop_details.explanation}` : "."));
+    text += (data.content || []).filter(b => b.type === "text").map(b => b.text).join("");
+    if (data.stop_reason !== "pause_turn") break;
+    messages.push({ role: "assistant", content: data.content });
+  }
+  return text;
+}
+
 async function searchAnthropic(prompt, apiKey) {
-  const r = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-20250514", max_tokens: 4000,
-      system: SEARCH_SYSTEM,
-      messages: [{ role: "user", content: prompt }],
-      tools: [{ type: "web_search_20250305", name: "web_search" }]
-    })
-  });
-  const data = await r.json();
-  if (data.error) throw new Error(data.error.message || "API error");
-  if (!data.content) return [];
-  const text = data.content.filter(b => b.type === "text").map(b => b.text).join("\n");
-  return parseJsonPapers(text);
+  return parseJsonPapers(await callClaude(prompt, SEARCH_SYSTEM, apiKey, { effort: "low" }));
 }
 
 // ============================================================
 // Gemini API — Google Search grounding for paper discovery + review
 // ============================================================
-async function callGemini(prompt, systemPrompt, geminiKey) {
-  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      system_instruction: { parts: [{ text: systemPrompt }] },
-      contents: [{ parts: [{ text: prompt }] }],
-      tools: [{ google_search: {} }]
-    })
-  });
-  const data = await r.json();
-  if (data.error) throw new Error(data.error.message || "Gemini API error");
-  const parts = data.candidates?.[0]?.content?.parts || [];
-  return parts.map(p => p.text || "").filter(Boolean).join("\n");
+async function callGemini(prompt, systemPrompt, geminiKey, { search = true } = {}) {
+  // Try the configured model, then Google's rolling "latest flash" alias (older model IDs get retired)
+  const models = [...new Set([(state.geminiModel || DEFAULT_GEMINI_MODEL).trim(), GEMINI_FALLBACK_MODEL])];
+  let lastErr = null;
+  for (const model of models) {
+    const r = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: systemPrompt }] },
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        ...(search ? { tools: [{ google_search: {} }] } : {})
+      })
+    }, { retries: 2, timeout: 180000, backoff: 3000 });
+    const data = await r.json().catch(() => ({}));
+    if (r.status === 404 || data.error?.status === "NOT_FOUND") {
+      lastErr = new Error(`Gemini model "${model}" is not available — set a current model name in Configure.`);
+      continue;
+    }
+    if (data.error) throw new Error(data.error.message || `Gemini API error (HTTP ${r.status})`);
+    const cand = data.candidates?.[0];
+    if (!cand) throw new Error(data.promptFeedback?.blockReason ? `Gemini blocked the prompt (${data.promptFeedback.blockReason})` : "Gemini returned no answer");
+    return (cand.content?.parts || []).filter(p => !p.thought).map(p => p.text || "").filter(Boolean).join("\n");
+  }
+  throw lastErr;
 }
 
 async function searchGemini(prompt, geminiKey) {
@@ -396,6 +594,17 @@ async function searchGemini(prompt, geminiKey) {
   return parseJsonPapers(text);
 }
 
+// Extract the first JSON value of the given kind ("[" or "{") from free-form model output
+function extractJson(text, open) {
+  const cleaned = String(text || "").replace(/```(?:json)?/gi, "").trim();
+  try { return JSON.parse(cleaned); } catch {}
+  const close = open === "[" ? "]" : "}";
+  const end = cleaned.lastIndexOf(close);
+  for (let i = cleaned.indexOf(open); i !== -1 && i < end; i = cleaned.indexOf(open, i + 1)) {
+    try { return JSON.parse(cleaned.slice(i, end + 1)); } catch {}
+  }
+  return null;
+}
 
 // ============================================================
 // Gemini AI helpers: keyword suggestion + author verification
@@ -416,10 +625,11 @@ ${existing}
 Suggest additional keywords I'm missing for each tier. Think about:
 - Spelling variants, hyphenation differences, abbreviations
 - Related techniques and methods used in this field
-- Common terminology in recent papers (2024-2026)
+- Common terminology in recent papers (last two years)
 - Competing/complementary methods
 - Key instruments, software tools, or facilities
 - Don't repeat keywords I already have
+- Keywords are matched as phrases against titles and abstracts, so prefer 1-4 word phrases authors actually write
 
 Return ONLY a JSON object with this format (no markdown, no prose):
 {"tier1": ["keyword1", "keyword2"], "tier2": ["keyword1", "keyword2"], "tier3": ["keyword1", "keyword2"]}
@@ -427,11 +637,8 @@ Return ONLY a JSON object with this format (no markdown, no prose):
 Each tier should have 5-15 suggestions. tier1 = most specific to my core technique, tier2 = adjacent methods, tier3 = broader field.`;
 
   const text = await callGemini(prompt, "You are a scientific literature search expert. Return only valid JSON. No markdown fences, no explanations.", geminiKey);
-  const cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-  try {
-    const m = cleaned.match(/\{[\s\S]*\}/);
-    return m ? JSON.parse(m[0]) : null;
-  } catch { return null; }
+  const obj = extractJson(text, "{");
+  return obj && typeof obj === "object" && !Array.isArray(obj) ? obj : null;
 }
 
 async function geminiVerifyAuthor(name, affiliation, note, geminiKey) {
@@ -449,92 +656,139 @@ Return ONLY a JSON object (no markdown, no prose):
 If you cannot find them with confidence, return: {"openalexId": "", "confidence": "low", "note": "reason"}`;
 
   const text = await callGemini(prompt, "You are a research author disambiguation tool. Return only valid JSON.", geminiKey);
-  const cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-  try {
-    const m = cleaned.match(/\{[\s\S]*\}/);
-    return m ? JSON.parse(m[0]) : null;
-  } catch { return null; }
+  return extractJson(text, "{");
 }
 
 function parseJsonPapers(text) {
-  const cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-  try {
-    const a = JSON.parse(cleaned);
-    return Array.isArray(a) ? a.filter(p => p.title && p.url) : [];
-  } catch {
-    const m = cleaned.match(/\[[\s\S]*\]/);
-    if (m) try { return JSON.parse(m[0]).filter(p => p.title && p.url); } catch {}
-    return [];
-  }
+  const a = extractJson(text, "[");
+  return Array.isArray(a) ? a.filter(p => p && p.title && (p.url || p.doi)) : [];
 }
 
+// Similar-title check used to confirm AI-reported papers against a real database record
+function titleTokens(t) { return new Set((t || "").toLowerCase().normalize("NFKD").replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter(w => w.length > 2)); }
+function titlesMatch(a, b) {
+  const A = titleTokens(a), B = titleTokens(b);
+  if (!A.size || !B.size) return false;
+  let inter = 0; for (const w of A) if (B.has(w)) inter++;
+  return inter / (A.size + B.size - inter) >= 0.75;
+}
+
+// Anti-hallucination: keep an AI-reported paper only if OpenAlex knows it (by DOI, else by title),
+// and replace the model's metadata with the database record.
+async function verifyAiPapers(papers, startDate) {
+  const slack = new Date(new Date(startDate) - 30 * 864e5).toISOString().slice(0, 10);
+  const verified = await mapLimit(papers, 4, async p => {
+    try {
+      let work = null;
+      const doi = cleanDoi(p.doi || (String(p.url || "").match(/10\.\d{4,9}\/[^\s?#"]+/) || [])[0]);
+      if (doi) {
+        const r = await fetchWithRetry(`https://api.openalex.org/works/https://doi.org/${doi}?mailto=${MAILTO}`, {}, { retries: 1 });
+        if (r.ok) work = await r.json();
+      }
+      if (!work && p.title) {
+        const d = await fetchJson(`https://api.openalex.org/works?search=${encodeURIComponent(p.title.slice(0, 200))}&per_page=5&mailto=${MAILTO}`, {}, { retries: 1 });
+        work = (d.results || []).find(w => titlesMatch(w.title, p.title)) || null;
+      }
+      if (!work || !titlesMatch(work.title, p.title)) return null;
+      const v = oaWorkToPaper(work);
+      if (v.date && v.date < slack) return null;  // real paper, but older than the window
+      return { ...v, abstract: v.abstract || p.abstract || "" };
+    } catch { return null; }
+  });
+  return verified.filter(Boolean);
+}
+
+// ============================================================
+// DIRECT DATABASE APIS (no key needed)
+// ============================================================
+
+// bioRxiv: full scan of every new preprint in the window (30 per page), filtered by subject category.
 async function searchBiorxiv(startDate, endDate, profile) {
+  const cats = new Set(splitList(profile.biorxivCategories).map(s => s.toLowerCase()));
+  const MAX_RECORDS = 3000;  // ~100 pages; beyond that Europe PMC + OpenAlex cover bioRxiv by keyword
+  const toPapers = coll => coll
+    .filter(item => (!cats.size || cats.has((item.category || "").toLowerCase().trim())) && String(item.version || "1") === "1")
+    .map(item => ({
+      title: item.title || "", abstract: item.abstract || "", authors: normalizeAuthorList(item.authors, "semicolon"),
+      doi: item.doi || "", date: item.date || "",
+      url: item.doi ? `https://doi.org/${item.doi}` : "",
+      source: "bioRxiv"
+    }));
+  const page = cursor => fetchJson(`https://api.biorxiv.org/details/biorxiv/${startDate}/${endDate}/${cursor}`, {}, { retries: 3, timeout: 30000 });
+  const first = await page(0);
+  const firstColl = first.collection || [];
+  const msg = (first.messages || [{}])[0] || {};
+  const total = Math.min(parseInt(msg.total) || firstColl.length, MAX_RECORDS);
+  const step = parseInt(msg.count) || firstColl.length || 30;
+  const cursors = [];
+  for (let c = step; c < total; c += step) cursors.push(c);
+  const rest = await mapLimit(cursors, 6, async c => { try { return (await page(c)).collection || []; } catch(e) { console.warn("bioRxiv page", c, e); return []; } });
+  const papers = toPapers(firstColl.concat(...rest));
+  papers._note = (parseInt(msg.total) || 0) > MAX_RECORDS ? `capped at ${MAX_RECORDS} of ${msg.total}` : "";
+  return papers;
+}
+
+// PubMed: phrase search in title/abstract, by date added to PubMed (catches epub-ahead-of-print too).
+async function searchPubmed(terms, days) {
+  const query = terms.slice(0, 40).map(k => `"${k.replace(/["\[\]]/g, "")}"[tiab]`).join(" OR ");
+  const base = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils";
+  const tool = `&tool=lit-monitor&email=${MAILTO}`;
+  const d1 = await fetchJson(`${base}/esearch.fcgi?db=pubmed&term=${encodeURIComponent(query)}&retmax=200&retmode=json&datetype=edat&reldate=${days}&sort=date${tool}`, {}, { retries: 3 });
+  const ids = (d1.esearchresult || {}).idlist || [];
+  if (!ids.length) return [];
+  await sleep(400);  // NCBI allows 3 requests/second without a key
+  const r2 = await fetchWithRetry(`${base}/efetch.fcgi?db=pubmed&id=${ids.join(",")}&retmode=xml${tool}`, {}, { retries: 3, timeout: 40000 });
+  if (!r2.ok) throw new Error(`PubMed efetch: HTTP ${r2.status}`);
+  const doc = new DOMParser().parseFromString(await r2.text(), "text/xml");
   const papers = [];
-  let cursor = 0;
-  const cats = new Set(["neuroscience","biophysics","cell biology"]);
-  while (true) {
-    const url = `https://api.biorxiv.org/details/biorxiv/${startDate}/${endDate}/${cursor}`;
-    const r = await fetch(url);
-    if (!r.ok) throw new Error(`bioRxiv API: ${r.status}`);
-    const data = await r.json();
-    const coll = data.collection || [];
-    if (!coll.length) break;
-    for (const item of coll) {
-      const cat = (item.category || "").toLowerCase();
-      if (cats.size && !cats.has(cat) && cat !== "") continue;
-      papers.push({
-        title: item.title || "", abstract: item.abstract || "", authors: item.authors || "",
-        doi: item.doi || "", date: item.date || "",
-        url: item.doi ? `https://doi.org/${item.doi}` : "",
-        source: "bioRxiv"
-      });
-    }
-    const total = (data.messages || [{}])[0].total || 0;
-    cursor += coll.length;
-    if (cursor >= total || cursor >= 3000) break;  // Safety cap at 3000
-    await new Promise(r => setTimeout(r, 500));
+  for (const art of doc.querySelectorAll("PubmedArticle")) {
+    const title = art.querySelector("ArticleTitle")?.textContent || "";
+    const abstract = Array.from(art.querySelectorAll("AbstractText")).map(a => (a.getAttribute("Label") ? a.getAttribute("Label") + ": " : "") + a.textContent).join(" ");
+    const auths = Array.from(art.querySelectorAll("AuthorList > Author")).map(a => {
+      const l = a.querySelector("LastName")?.textContent || a.querySelector("CollectiveName")?.textContent || "";
+      const f = a.querySelector("ForeName")?.textContent || a.querySelector("Initials")?.textContent || "";
+      return l ? (f ? `${f} ${l}` : l) : "";
+    }).filter(Boolean).join(", ");
+    const pmid = art.querySelector("MedlineCitation > PMID")?.textContent || "";
+    let doi = "";
+    for (const id of art.querySelectorAll("ArticleIdList > ArticleId")) { if (id.getAttribute("IdType") === "doi") doi = id.textContent; }
+    // Prefer the electronic publication date; fall back to the issue date
+    const ad = art.querySelector("ArticleDate"), pd = art.querySelector("JournalIssue PubDate");
+    const pick = (el, sel) => el?.querySelector(sel)?.textContent;
+    const date = ad ? isoDate(pick(ad, "Year"), pick(ad, "Month"), pick(ad, "Day"))
+      : pd ? (isoDate(pick(pd, "Year"), pick(pd, "Month"), pick(pd, "Day")) || (pick(pd, "MedlineDate") || "").slice(0, 4)) : "";
+    const journal = art.querySelector("Journal > ISOAbbreviation")?.textContent || art.querySelector("Journal > Title")?.textContent || "PubMed";
+    papers.push({ title, abstract, authors: auths, doi, date, url: pmid ? `https://pubmed.ncbi.nlm.nih.gov/${pmid}/` : (doi ? `https://doi.org/${doi}` : ""), source: journal });
   }
   return papers;
 }
 
-async function searchPubmed(keywords, days) {
-  const parts = keywords.slice(0, 12).map(k => `("${k}"[Title/Abstract])`);
-  const query = parts.join(" OR ");
-  const esUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=${encodeURIComponent(query)}&retmax=80&retmode=json&datetype=pdat&reldate=${days}&sort=date`;
-  const r1 = await fetch(esUrl);
-  if (!r1.ok) throw new Error(`PubMed esearch: ${r1.status}`);
-  const d1 = await r1.json();
-  const ids = (d1.esearchresult || {}).idlist || [];
-  if (!ids.length) return [];
-  await new Promise(r => setTimeout(r, 400));
-  const efUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id=${ids.slice(0,40).join(",")}&retmode=xml`;
-  const r2 = await fetch(efUrl);
-  if (!r2.ok) throw new Error(`PubMed efetch: ${r2.status}`);
-  const xml = await r2.text();
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(xml, "text/xml");
+// Europe PMC: PubMed + preprints (bioRxiv, medRxiv, Research Square, arXiv q-bio…) with phrase search on title/abstract.
+async function searchEuropePmc(terms, startDate, endDate) {
+  const q = `(${terms.slice(0, 40).map(t => `TITLE_ABS:"${t.replace(/["()]/g, "")}"`).join(" OR ")}) AND FIRST_PDATE:[${startDate} TO ${endDate}]`;
   const papers = [];
-  for (const art of doc.querySelectorAll("PubmedArticle")) {
-    const title = art.querySelector("ArticleTitle")?.textContent || "";
-    const absParts = art.querySelectorAll("AbstractText");
-    const abstract = Array.from(absParts).map(a => a.textContent).join(" ");
-    const auths = Array.from(art.querySelectorAll("Author")).map(a => {
-      const l = a.querySelector("LastName")?.textContent || "";
-      const i = a.querySelector("Initials")?.textContent || "";
-      return l ? `${l} ${i}` : "";
-    }).filter(Boolean).join(", ");
-    const pmid = art.querySelector("PMID")?.textContent || "";
-    let doi = "";
-    for (const id of art.querySelectorAll("ArticleId")) { if (id.getAttribute("IdType") === "doi") doi = id.textContent; }
-    const pd = art.querySelector("PubDate");
-    const dateStr = pd ? [pd.querySelector("Year")?.textContent, pd.querySelector("Month")?.textContent, pd.querySelector("Day")?.textContent].filter(Boolean).join("-") : "";
-    papers.push({ title, abstract, authors: auths, doi, date: dateStr, url: pmid ? `https://pubmed.ncbi.nlm.nih.gov/${pmid}/` : "", source: "PubMed" });
+  let cursor = "*";
+  for (let pageNo = 0; pageNo < 4; pageNo++) {
+    const d = await fetchJson(`https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=${encodeURIComponent(q)}&format=json&resultType=core&pageSize=100&cursorMark=${encodeURIComponent(cursor)}`, {}, { retries: 2, timeout: 30000 });
+    const list = d.resultList?.result || [];
+    for (const it of list) {
+      const doi = it.doi || "";
+      const src = it.source === "PPR" ? (it.bookOrReportDetails?.publisher || "Preprint") : (it.journalInfo?.journal?.title || "Europe PMC");
+      papers.push({
+        title: stripTags(it.title).replace(/\.$/, ""), abstract: stripTags(it.abstractText), authors: normalizeAuthorList(it.authorString, "initials"),
+        doi, date: it.firstPublicationDate || "",
+        url: doi ? `https://doi.org/${doi}` : `https://europepmc.org/article/${it.source}/${it.id}`,
+        source: src
+      });
+    }
+    if (!d.nextCursorMark || d.nextCursorMark === cursor || list.length < 100) break;
+    cursor = d.nextCursorMark;
   }
   return papers;
 }
 
 // ============================================================
-// OpenAlex API — covers ALL major journals, preprints, proceedings
+// OpenAlex API — covers ALL major journals, preprints (incl. arXiv), proceedings
 // Free, no key needed. 250M+ scholarly works.
 // ============================================================
 function reconstructAbstract(idx) {
@@ -543,84 +797,55 @@ function reconstructAbstract(idx) {
   for (const [word, positions] of Object.entries(idx)) {
     for (const pos of positions) words[pos] = word;
   }
-  return words.join(" ");
+  return words.filter(w => w !== undefined).join(" ");
 }
 
-async function searchOpenAlex(keywords, startDate, endDate, authors) {
+const oaShortId = id => String(id || "").replace(/.*\//, "");
+
+async function searchOpenAlex(terms, startDate, endDate, authors) {
   const papers = [];
-  // Strategy 1: Keyword search — use shorter, broader terms extracted from keywords
-  const shortTerms = new Set();
-  for (const kw of keywords) {
-    shortTerms.add(kw);
-    const words = kw.split(/\s+/);
-    if (words.length > 2) {
-      shortTerms.add(words.slice(0, 2).join(" "));
-      shortTerms.add(words.slice(-2).join(" "));
-    }
-  }
-  const termList = [...shortTerms].slice(0, 20);
+  const select = "id,doi,title,publication_date,authorships,primary_location,abstract_inverted_index,type";
+  // Scholarly work types only — OpenAlex also indexes datasets, data-portal queries, paratext, etc.
+  const dateFilter = `from_publication_date:${startDate},to_publication_date:${endDate},type:article|preprint|review|letter|book-chapter`;
+
+  // Strategy 1: phrase search restricted to title + abstract (full-text search adds too much noise).
+  // Commas would split the filter, so strip them; batch ~6 phrases per boolean query.
+  const phrases = terms.map(t => `"${t.replace(/[",|]/g, " ").trim()}"`);
   const batches = [];
-  for (let i = 0; i < termList.length; i += 4) {
-    batches.push(termList.slice(i, i + 4).join(" OR "));
-  }
-  for (const query of batches.slice(0, 5)) {
+  for (let i = 0; i < phrases.length && batches.length < 10; i += 6) batches.push(phrases.slice(i, i + 6).join(" OR "));
+  await mapLimit(batches, 3, async query => {
     try {
-      const url = `https://api.openalex.org/works?search=${encodeURIComponent(query)}&filter=from_publication_date:${startDate},to_publication_date:${endDate}&sort=publication_date:desc&per_page=40&mailto=lit-monitor@research.org`;
-      const r = await fetch(url);
-      if (!r.ok) { console.warn("OpenAlex keyword search", r.status); continue; }
-      const data = await r.json();
-      for (const work of (data.results || [])) {
-        papers.push(oaWorkToPaper(work));
-      }
-      await new Promise(r => setTimeout(r, 150));
+      const data = await fetchJson(`https://api.openalex.org/works?filter=title_and_abstract.search:${encodeURIComponent(query)},${dateFilter}&per_page=100&select=${select}&mailto=${MAILTO}`);
+      for (const work of (data.results || [])) papers.push(oaWorkToPaper(work));
     } catch(e) { console.warn("OpenAlex keyword query failed:", e); }
-  }
+  });
 
-  // Strategy 2: AUTHOR ID search — exact disambiguation via OpenAlex Author IDs
-  // This is the gold standard - no false positives
+  // Strategy 2: AUTHOR ID search — exact disambiguation via OpenAlex Author IDs (no false positives)
   const authorsWithIds = (authors || []).filter(a => a.openalexId);
-  if (authorsWithIds.length > 0) {
-    // Batch up to 20 author IDs in a single query using OR syntax
-    for (let i = 0; i < authorsWithIds.length; i += 20) {
-      const batch = authorsWithIds.slice(i, i + 20);
-      const idFilter = batch.map(a => a.openalexId).join("|");
+  const idBatches = [];
+  for (let i = 0; i < authorsWithIds.length; i += 25) idBatches.push(authorsWithIds.slice(i, i + 25));
+  await mapLimit(idBatches, 2, async batch => {
+    const idFilter = batch.map(a => oaShortId(a.openalexId)).join("|");
+    for (let pageNo = 1; pageNo <= 4; pageNo++) {
       try {
-        const url = `https://api.openalex.org/works?filter=authorships.author.id:${idFilter},from_publication_date:${startDate},to_publication_date:${endDate}&sort=publication_date:desc&per_page=50&mailto=lit-monitor@research.org`;
-        const r = await fetch(url);
-        if (!r.ok) continue;
-        const data = await r.json();
-        for (const work of (data.results || [])) {
-          const paper = oaWorkToPaper(work);
-          // Tag with matched author IDs for verified scoring
-          paper._matchedAuthorIds = (work.authorships || [])
-            .map(au => au.author?.id || "")
-            .filter(id => batch.some(a => a.openalexId === id || (a.openalexId && id.endsWith(a.openalexId.replace(/.*\//,"")))));
-          papers.push(paper);
-        }
-        await new Promise(r => setTimeout(r, 150));
-      } catch(e) { console.warn("OpenAlex author ID query failed:", e); }
+        const data = await fetchJson(`https://api.openalex.org/works?filter=authorships.author.id:${idFilter},${dateFilter}&sort=publication_date:desc&per_page=100&page=${pageNo}&select=${select}&mailto=${MAILTO}`);
+        for (const work of (data.results || [])) papers.push(oaWorkToPaper(work));
+        if ((data.results || []).length < 100) break;
+      } catch(e) { console.warn("OpenAlex author ID query failed:", e); break; }
     }
-  }
+  });
 
-  // Strategy 3: Fallback author name search for authors WITHOUT IDs (less reliable)
-  const authorsNoId = (authors || []).filter(a => !a.openalexId);
-  if (authorsNoId.length > 0) {
-    const searchableAuthors = authorsNoId.filter(a => a.last && !COMMON_LASTNAMES.has(a.last.toLowerCase())).slice(0, 12);
-    for (let i = 0; i < searchableAuthors.length; i += 3) {
-      const batch = searchableAuthors.slice(i, i + 3);
-      const authorQuery = batch.map(a => `${a.first} ${a.last}`).join(" OR ");
-      try {
-        const url = `https://api.openalex.org/works?search=${encodeURIComponent(authorQuery)}&filter=from_publication_date:${startDate},to_publication_date:${endDate}&sort=publication_date:desc&per_page=30&mailto=lit-monitor@research.org`;
-        const r = await fetch(url);
-        if (!r.ok) continue;
-        const data = await r.json();
-        for (const work of (data.results || [])) {
-          papers.push(oaWorkToPaper(work));
-        }
-        await new Promise(r => setTimeout(r, 150));
-      } catch(e) { console.warn("OpenAlex author name query failed:", e); }
-    }
-  }
+  // Strategy 3: Fallback author-name search for authors WITHOUT IDs (less reliable — scoring re-checks names)
+  const searchableAuthors = (authors || []).filter(a => !a.openalexId && a.last && !COMMON_LASTNAMES.has(a.last.toLowerCase()));
+  const nameBatches = [];
+  for (let i = 0; i < searchableAuthors.length && nameBatches.length < 6; i += 4) nameBatches.push(searchableAuthors.slice(i, i + 4));
+  await mapLimit(nameBatches, 2, async batch => {
+    const q = batch.map(a => `"${`${a.first || ""} ${a.last}`.trim().replace(/[",|]/g, " ")}"`).join(" OR ");
+    try {
+      const data = await fetchJson(`https://api.openalex.org/works?filter=raw_author_name.search:${encodeURIComponent(q)},${dateFilter}&per_page=100&select=${select}&mailto=${MAILTO}`);
+      for (const work of (data.results || [])) papers.push(oaWorkToPaper(work));
+    } catch(e) { console.warn("OpenAlex author name query failed:", e); }
+  });
   return papers;
 }
 
@@ -631,48 +856,43 @@ async function lookupAuthorId(query, affiliation) {
 
   // Strategy 1: Autocomplete API (fast, good for common names)
   try {
-    const url = `https://api.openalex.org/autocomplete/authors?q=${encodeURIComponent(query)}&mailto=lit-monitor@research.org`;
-    const r = await fetch(url);
-    if (r.ok) {
-      const data = await r.json();
-      results = (data.results || []).map(item => ({
-        id: item.id,
-        shortId: item.id?.replace("https://openalex.org/", "") || "",
-        name: item.display_name,
-        hint: item.hint || "",
-        works: item.works_count || 0,
-        cited: item.cited_by_count || 0,
-        orcid: item.external_id || ""
-      }));
-    }
+    const data = await fetchJson(`https://api.openalex.org/autocomplete/authors?q=${encodeURIComponent(query)}&mailto=${MAILTO}`, {}, { retries: 1 });
+    results = (data.results || []).map(item => ({
+      id: item.id,
+      shortId: oaShortId(item.id),
+      name: item.display_name,
+      hint: item.hint || "",
+      works: item.works_count || 0,
+      cited: item.cited_by_count || 0,
+      orcid: item.external_id || ""
+    }));
   } catch(e) { console.warn("Autocomplete failed:", e); }
 
   // Strategy 2: Full authors search (more comprehensive, catches names autocomplete misses)
   if (results.length < 3) {
     try {
-      const searchQuery = affiliation ? `${query} ${affiliation}` : query;
-      const url = `https://api.openalex.org/authors?search=${encodeURIComponent(searchQuery)}&per_page=10&mailto=lit-monitor@research.org`;
-      const r = await fetch(url);
-      if (r.ok) {
-        const data = await r.json();
-        const seenIds = new Set(results.map(r => r.id));
-        for (const item of (data.results || [])) {
-          if (seenIds.has(item.id)) continue;
-          const inst = (item.last_known_institutions || []).map(i => i.display_name).join(", ");
-          results.push({
-            id: item.id,
-            shortId: item.id?.replace("https://openalex.org/", "") || "",
-            name: item.display_name,
-            hint: inst || "",
-            works: item.works_count || 0,
-            cited: item.cited_by_count || 0,
-            orcid: item.orcids?.[0] || ""
-          });
-        }
+      const data = await fetchJson(`https://api.openalex.org/authors?search=${encodeURIComponent(query)}&per_page=10&mailto=${MAILTO}`, {}, { retries: 1 });
+      const seenIds = new Set(results.map(r => r.id));
+      for (const item of (data.results || [])) {
+        if (seenIds.has(item.id)) continue;
+        const inst = (item.last_known_institutions || []).map(i => i.display_name).join(", ");
+        results.push({
+          id: item.id,
+          shortId: oaShortId(item.id),
+          name: item.display_name,
+          hint: inst || "",
+          works: item.works_count || 0,
+          cited: item.cited_by_count || 0,
+          orcid: item.orcid || item.ids?.orcid || ""
+        });
       }
     } catch(e) { console.warn("Authors search failed:", e); }
   }
 
+  // Rank candidates whose institution matches the stored affiliation first
+  const affWords = String(affiliation || "").toLowerCase().split(/[\s,.()/-]+/).filter(w => w.length > 3);
+  const affHit = c => affWords.some(w => (c.hint || "").toLowerCase().includes(w)) ? 1 : 0;
+  results.sort((x, y) => affHit(y) - affHit(x) || y.works - x.works);
   return results.slice(0, 10);
 }
 
@@ -680,15 +900,13 @@ function oaWorkToPaper(work) {
   const abstract = reconstructAbstract(work.abstract_inverted_index);
   const authors = (work.authorships || []).map(a => a.author?.display_name || "").filter(Boolean).join(", ");
   const journal = work.primary_location?.source?.display_name || "";
-  const doi = (work.doi || "").replace("https://doi.org/", "");
+  const doi = cleanDoi(work.doi);
   // Extract OpenAlex author IDs for ground-truth matching
-  const openalexAuthorIds = (work.authorships || [])
-    .map(a => a.author?.id || "")
-    .filter(Boolean);
+  const openalexAuthorIds = (work.authorships || []).map(a => a.author?.id || "").filter(Boolean);
   return {
-    title: work.title || "", abstract, authors, doi,
+    title: stripTags(work.title || ""), abstract, authors, doi,
     date: work.publication_date || "",
-    url: work.doi || work.id || "",
+    url: doi ? `https://doi.org/${doi}` : (work.primary_location?.landing_page_url || work.id || ""),
     source: journal || "OpenAlex",
     _openalexAuthorIds: openalexAuthorIds
   };
@@ -698,139 +916,87 @@ function oaWorkToPaper(work) {
 // CrossRef API — every DOI-registered publication
 // Covers Optica/OSA, IUCr, APS, AIP, Elsevier, Wiley, Springer
 // ============================================================
-async function searchCrossRef(keywords, startDate, authors) {
+async function searchCrossRef(terms, startDate, endDate, authors) {
   const papers = [];
-  // Keyword queries — use shorter terms for broader matching
-  for (const kw of keywords.slice(0, 6)) {
+  const filter = `from-pub-date:${startDate},until-pub-date:${endDate},type:journal-article,type:posted-content,type:proceedings-article`;
+  // Relevance-ranked (CrossRef's default) — sorting by date would return the newest *loosely* matching items
+  await mapLimit(terms.slice(0, 10), 2, async kw => {
     try {
-      const url = `https://api.crossref.org/works?query=${encodeURIComponent(kw)}&filter=from-pub-date:${startDate}&rows=15&sort=published&order=desc&mailto=lit-monitor@research.org`;
-      const r = await fetch(url);
-      if (!r.ok) { console.warn("CrossRef", r.status); continue; }
-      const data = await r.json();
-      for (const item of (data.message?.items || [])) {
-        papers.push(crItemToPaper(item));
-      }
-      await new Promise(r => setTimeout(r, 250));
+      const data = await fetchJson(`https://api.crossref.org/works?query.bibliographic=${encodeURIComponent(kw)}&filter=${filter}&rows=25&mailto=${MAILTO}`, {}, { retries: 2, timeout: 30000 });
+      for (const item of (data.message?.items || [])) papers.push(crItemToPaper(item));
     } catch(e) { console.warn("CrossRef query failed:", e); }
-  }
-  // Author queries — search by name for watched authors with uncommon names
-  if (authors) {
-    const searchable = authors.filter(a => a.last && !COMMON_LASTNAMES.has(a.last.toLowerCase()) && a.last.length > 3).slice(0, 8);
-    for (const a of searchable) {
-      try {
-        const url = `https://api.crossref.org/works?query.author=${encodeURIComponent(a.first+" "+a.last)}&filter=from-pub-date:${startDate}&rows=10&sort=published&order=desc&mailto=lit-monitor@research.org`;
-        const r = await fetch(url);
-        if (!r.ok) continue;
-        const data = await r.json();
-        for (const item of (data.message?.items || [])) {
-          papers.push(crItemToPaper(item));
-        }
-        await new Promise(r => setTimeout(r, 200));
-      } catch(e) { console.warn("CrossRef author query failed:", e); }
-    }
-  }
+  });
+  // Author queries — watched authors with uncommon names (scoring re-verifies the name)
+  const searchable = (authors || []).filter(a => a.last && !COMMON_LASTNAMES.has(a.last.toLowerCase()) && a.last.length > 3).slice(0, 12);
+  await mapLimit(searchable, 2, async a => {
+    try {
+      const data = await fetchJson(`https://api.crossref.org/works?query.author=${encodeURIComponent(`${a.first || ""} ${a.last}`.trim())}&filter=${filter}&rows=15&mailto=${MAILTO}`, {}, { retries: 2, timeout: 30000 });
+      for (const item of (data.message?.items || [])) papers.push(crItemToPaper(item));
+    } catch(e) { console.warn("CrossRef author query failed:", e); }
+  });
   return papers;
 }
 
 function crItemToPaper(item) {
-  const title = (item.title || [])[0] || "";
-  const authors = (item.author || []).map(a => `${a.family || ""} ${(a.given || "")[0] || ""}`.trim()).join(", ");
+  const title = stripTags((item.title || [])[0] || "");
+  const authors = (item.author || []).map(a => `${a.given || ""} ${a.family || a.name || ""}`.trim()).filter(Boolean).join(", ");
   const doi = item.DOI || "";
-  const pubParts = item.published?.["date-parts"]?.[0] || [];
-  const date = pubParts.length >= 3 ? pubParts.join("-") : pubParts.length === 2 ? `${pubParts[0]}-${String(pubParts[1]).padStart(2,"0")}` : pubParts[0]?.toString() || "";
-  const journal = (item["container-title"] || [])[0] || "";
-  const abstract = (item.abstract || "").replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim();
-  return { title, abstract, authors, doi, date, url: item.URL || (doi ? `https://doi.org/${doi}` : ""), source: journal || "CrossRef" };
+  const parts = (item.published || item["published-online"] || item["published-print"] || item.issued)?.["date-parts"]?.[0] || [];
+  const date = isoDate(parts[0], parts[1], parts[2]);
+  const journal = (item["container-title"] || [])[0] || (item.subtype === "preprint" ? (item.institution?.[0]?.name || "Preprint") : "");
+  const abstract = stripTags(item.abstract).replace(/^Abstract\s*/i, "");
+  return { title, abstract, authors, doi, date, url: doi ? `https://doi.org/${doi}` : (item.URL || ""), source: journal || "CrossRef" };
 }
 
 // ============================================================
-// Semantic Scholar API — 200M+ papers, good coverage, free, no key needed
+// Semantic Scholar API — 200M+ papers. The anonymous rate limit is shared and strict,
+// so we send few, sequential queries and back off on 429.
 // ============================================================
-async function searchSemanticScholar(keywords, startDate, endDate, authors) {
+async function searchSemanticScholar(terms, startDate, endDate) {
   const papers = [];
-  const year = new Date(startDate).getFullYear();
-
-  // Strategy 1: Keyword search with broad + specific terms
-  const searchTerms = [...new Set([
-    ...keywords.slice(0, 12),
-    // Also extract shorter sub-terms
-    ...keywords.slice(0, 8).flatMap(kw => {
-      const words = kw.split(/\s+/);
-      return words.length > 2 ? [words.slice(0, 2).join(" ")] : [];
-    })
-  ])].slice(0, 15);
-
-  for (const term of searchTerms) {
+  let rateLimited = 0;
+  for (const term of terms.slice(0, 8)) {
     try {
-      const url = `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(term)}&year=${year}-&fields=title,authors,abstract,externalIds,publicationDate,venue,url&limit=20`;
-      const r = await fetch(url);
+      const url = `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(term)}&publicationDateOrYear=${startDate}:${endDate}&fields=title,authors,abstract,externalIds,publicationDate,venue,url&limit=50`;
+      const r = await fetchWithRetry(url, {}, { retries: 1, backoff: 2500 });
+      // Pool saturated — further queries would only add waiting time to every search
+      if (r.status === 429) { rateLimited++; break; }
       if (!r.ok) { console.warn("S2 search", r.status); continue; }
       const data = await r.json();
       for (const p of (data.data || [])) {
-        // Filter by date range
-        if (p.publicationDate && p.publicationDate < startDate) continue;
-        if (p.publicationDate && p.publicationDate > endDate) continue;
         const doi = p.externalIds?.DOI || "";
-        const authStr = (p.authors || []).map(a => a.name || "").filter(Boolean).join(", ");
         papers.push({
           title: p.title || "",
           abstract: p.abstract || "",
-          authors: authStr,
+          authors: (p.authors || []).map(a => a.name || "").filter(Boolean).join(", "),
           doi,
           date: p.publicationDate || "",
-          url: doi ? `https://doi.org/${doi}` : (p.url || `https://www.semanticscholar.org/paper/${p.paperId}`),
-          source: p.venue || "Semantic Scholar"
+          url: doi ? `https://doi.org/${doi}` : (p.externalIds?.ArXiv ? `https://arxiv.org/abs/${p.externalIds.ArXiv}` : (p.url || `https://www.semanticscholar.org/paper/${p.paperId}`)),
+          source: p.venue || (p.externalIds?.ArXiv ? "arXiv" : "Semantic Scholar")
         });
       }
-      await new Promise(r => setTimeout(r, 350)); // rate limit: 100 req / 5 min
+      await sleep(1100);  // ~1 request/second keeps the anonymous pool happy
     } catch(e) { console.warn("S2 query failed:", e); }
   }
-
-  // Strategy 2: Author search by name (for authors with uncommon names)
-  if (authors) {
-    const searchable = authors.filter(a => a.last && !COMMON_LASTNAMES.has(a.last.toLowerCase()) && a.last.length > 3).slice(0, 10);
-    for (const a of searchable) {
-      try {
-        // Search by author name — S2 supports this via the query parameter
-        const url = `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(a.first + " " + a.last)}&year=${year}-&fields=title,authors,abstract,externalIds,publicationDate,venue,url&limit=10`;
-        const r = await fetch(url);
-        if (!r.ok) continue;
-        const data = await r.json();
-        for (const p of (data.data || [])) {
-          if (p.publicationDate && p.publicationDate < startDate) continue;
-          if (p.publicationDate && p.publicationDate > endDate) continue;
-          const doi = p.externalIds?.DOI || "";
-          const authStr = (p.authors || []).map(au => au.name || "").filter(Boolean).join(", ");
-          papers.push({
-            title: p.title || "",
-            abstract: p.abstract || "",
-            authors: authStr,
-            doi,
-            date: p.publicationDate || "",
-            url: doi ? `https://doi.org/${doi}` : (p.url || `https://www.semanticscholar.org/paper/${p.paperId}`),
-            source: p.venue || "Semantic Scholar"
-          });
-        }
-        await new Promise(r => setTimeout(r, 350));
-      } catch(e) { console.warn("S2 author query failed:", e); }
-    }
-  }
+  // The shared anonymous pool is often saturated; that's a soft failure, not an error
+  if (rateLimited) papers._note = papers.length ? "partly rate-limited" : "busy — rate-limited, try again later";
   return papers;
 }
 
 function buildAnthropicQueries(profile) {
   const end = new Date(), start = new Date(end - profile.lookbackDays * 864e5);
   const ds = d => d.toISOString().split("T")[0];
-  const range = `published between ${ds(start)} and ${ds(end)}`;
+  const ctx = profile.description ? `\nResearch context: ${profile.description}` : "";
+  const range = `published between ${ds(start)} and ${ds(end)}${ctx}\n`;
   const queries = [];
   const t1 = profile.tiers.tier1?.keywords || [];
-  if (t1.length) queries.push({ label: `Searching ${profile.tiers.tier1.label}…`, prompt: `Find scientific papers ${range} about:\n${t1.join("\n")}\n\nSearch bioRxiv, PubMed, arXiv.` });
+  if (t1.length) queries.push({ label: `Searching ${profile.tiers.tier1.label}…`, prompt: `Find scientific papers ${range} about:\n${t1.join("\n")}\n\nSearch bioRxiv, arXiv, PubMed and journal sites. Include each paper\'s DOI.` });
   const auths = (profile.authors || []).slice(0, 16);
-  if (auths.length) queries.push({ label: "Checking watched authors…", prompt: `Find papers ${range} by: ${auths.map(a=>`${a.first} ${a.last}`).join(", ")}.\nSearch bioRxiv, PubMed, Google Scholar, arXiv.` });
+  if (auths.length) queries.push({ label: "Checking watched authors…", prompt: `Find papers ${range} by: ${auths.map(a=>`${a.first} ${a.last}`).join(", ")}.\nSearch bioRxiv, arXiv, PubMed, Google Scholar. Include each paper\'s DOI.` });
   const t2 = profile.tiers.tier2?.keywords || [];
-  if (t2.length) queries.push({ label: `Scanning ${profile.tiers.tier2.label}…`, prompt: `Find papers ${range} about:\n${t2.slice(0,10).join("\n")}\n\nSearch bioRxiv, PubMed, arXiv.` });
+  if (t2.length) queries.push({ label: `Scanning ${profile.tiers.tier2.label}…`, prompt: `Find papers ${range} about:\n${t2.slice(0,10).join("\n")}\n\nSearch bioRxiv, arXiv, PubMed and journal sites. Include each paper\'s DOI.` });
   const t3 = profile.tiers.tier3?.keywords || [];
-  if (t3.length > 4) queries.push({ label: `Scanning ${profile.tiers.tier3.label}…`, prompt: `Find papers ${range} about:\n${t3.slice(0,8).join("\n")}\n\nSearch bioRxiv, PubMed, arXiv.` });
+  if (t3.length > 4) queries.push({ label: `Scanning ${profile.tiers.tier3.label}…`, prompt: `Find papers ${range} about:\n${t3.slice(0,8).join("\n")}\n\nSearch bioRxiv, arXiv, PubMed and journal sites. Include each paper\'s DOI.` });
   return queries;
 }
 
@@ -846,61 +1012,81 @@ const COMMON_LASTNAMES = new Set([
 ]);
 const escRe = s => s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
 
+// Strip accents so "Viganò", "Müller", "Daniël" match "Vigano", "Muller", "Daniel"
+const foldAccents = s => String(s || "").normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/ß/g, "ss").replace(/ø/g, "o").replace(/ł/g, "l");
+
 // Normalize text for fuzzy matching across hyphenation/spacing variants
 // "X-ray nano-holotomography" and "Xray nanoholotomography" both normalize the same way
 function normalizeText(s) {
-  const lower = (s || "").toLowerCase();
+  const lower = foldAccents(s).toLowerCase().replace(/[‐-―−]/g, "-");  // unicode dashes → hyphen
+  const spaced = lower.replace(/[-_/]/g, " ").replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
   return {
-    spaced: lower.replace(/[-_/]/g, ' ').replace(/\s+/g, ' ').trim(),  // hyphens → spaces
-    joined: lower.replace(/[-_/\s]+/g, '')                             // remove all whitespace + hyphens
+    spaced: " " + spaced + " ",          // padded so " word" checks give word boundaries
+    joined: spaced.replace(/ /g, "")      // remove all whitespace + hyphens
   };
 }
 
-function fuzzyContains(textNorm, keyword) {
-  const k = normalizeText(keyword);
-  // Method 1: Exact phrase match (with hyphenation/spacing tolerance)
-  if (textNorm.spaced.includes(k.spaced) || textNorm.joined.includes(k.joined)) return true;
-
-  // Method 2: Bag-of-words — all significant words from keyword appear in text
-  // Catches "synchrotron X-ray brain" matching "synchrotron-based X-ray imaging of brain tissue"
-  const words = k.spaced.split(/\s+/).filter(w => w.length >= 3);
-  if (words.length >= 2) {
-    return words.every(w => textNorm.spaced.includes(w));
+const kwCache = new Map();
+function keywordInfo(keyword) {
+  let k = kwCache.get(keyword);
+  if (!k) {
+    const n = normalizeText(keyword);
+    const phrase = n.spaced.trim();
+    // Significant words for the bag-of-words fallback (≥3 chars, not filler words)
+    const words = phrase.split(" ").filter(w => w.length >= 3 && !STOPWORDS.has(w));
+    k = { phrase, joined: n.joined, words };
+    kwCache.set(keyword, k);
   }
-
-  return false;
+  return k;
 }
+const STOPWORDS = new Set(["the","and","for","with","from","using","based","via","into","of","in","on"]);
+
+// Returns 2 for an exact phrase match, 1 for a bag-of-words match (all words present), 0 otherwise.
+function matchKeyword(textNorm, keyword) {
+  const k = keywordInfo(keyword);
+  if (!k.phrase) return 0;
+  // Exact phrase match (with hyphenation/spacing tolerance), anchored at a word start
+  if (textNorm.spaced.includes(" " + k.phrase)) return 2;
+  // Joined form catches "nano tomography" vs "nanotomography"; require ≥8 chars to avoid accidental hits
+  if (k.joined.length >= 8 && textNorm.joined.includes(k.joined)) return 2;
+  // Bag-of-words: every significant word appears as a word start (so "ray" won't match "array")
+  if (k.words.length >= 2 && k.words.every(w => textNorm.spaced.includes(" " + w))) return 1;
+  return 0;
+}
+// Kept for callers that only need a boolean
+const fuzzyContains = (textNorm, keyword) => matchKeyword(textNorm, keyword) > 0;
 
 function scorePaper(paper, profile) {
   const titleNorm = normalizeText(paper.title || "");
   const abstractNorm = normalizeText(paper.abstract || "");
   const fullTextNorm = {
-    spaced: titleNorm.spaced + " " + abstractNorm.spaced,
-    joined: titleNorm.joined + abstractNorm.joined
+    spaced: titleNorm.spaced + abstractNorm.spaced,
+    joined: titleNorm.joined + " " + abstractNorm.joined
   };
-  const authStr = (paper.authors||"");
+  // Accent-folded author string, single-spaced, for name matching
+  const authStr = foldAccents(paper.authors || "").replace(/\s+/g, " ");
   let score = 0;
   const reasons = [];
   let hasTier1Anywhere = false;
-  let hasTier2InTitle = false;
   let hasTier2Anywhere = false;
   let hasVerifiedAuthor = false;
   let numKwMatches = 0;
 
-  // Keyword matching with fuzzy hyphenation/spacing tolerance + bag-of-words
+  // Keyword matching: exact phrase = full tier score, all-words-present = half; title hits get +50%
   for (const [k, tier] of Object.entries(profile.tiers)) {
     for (const kw of (tier.keywords||[])) {
       if (!kw) continue;
-      if (fuzzyContains(fullTextNorm, kw)) {
-        score += tier.score;
-        numKwMatches++;
-        reasons.push({ tier: tier.label, kw, sc: tier.score });
-        if (k === "tier1") hasTier1Anywhere = true;
-        if (k === "tier2") {
-          hasTier2Anywhere = true;
-          if (fuzzyContains(titleNorm, kw)) hasTier2InTitle = true;
-        }
-      }
+      const m = matchKeyword(fullTextNorm, kw);
+      if (!m) continue;
+      const inTitle = matchKeyword(titleNorm, kw) === 2;
+      let sc = m === 2 ? tier.score : Math.ceil(tier.score / 2);
+      if (inTitle) sc = Math.round(sc * 1.5);
+      score += sc;
+      numKwMatches++;
+      reasons.push({ tier: tier.label, tierKey: k, kw: kw + (inTitle ? " (title)" : m === 1 ? " (words)" : ""), sc });
+      // A loose bag-of-words hit on tier 1/2 alone isn't strong enough to pass the relevance gate
+      if (k === "tier1" && (m === 2 || numKwMatches >= 2)) hasTier1Anywhere = true;
+      if (k === "tier2" && (m === 2 || numKwMatches >= 2)) hasTier2Anywhere = true;
     }
   }
 
@@ -916,27 +1102,31 @@ function scorePaper(paper, profile) {
 
   // Author matching — uses module-scope COMMON_LASTNAMES and escRe
   const matched = new Set();
+  // Unicode-safe word boundaries (\b breaks on accented letters)
+  const B = "(?<![A-Za-z])", E = "(?![A-Za-z])";
 
   for (const a of (profile.authors||[])) {
-    const last = (a.last||"").trim();
-    const first = (a.first||"").trim();
-    if (!last || matched.has(last)) continue;
+    const last = foldAccents(a.last||"").trim();
+    const first = foldAccents(a.first||"").trim();
+    const key = `${first} ${last}`.toLowerCase();
+    if (!last || matched.has(key)) continue;
     const lastLow = last.toLowerCase();
     const firstLow = first.toLowerCase();
-    const fi = firstLow.charAt(0);
-    const middle = (a.middle||"").trim().toLowerCase();
-    const mi = middle.charAt(0);
+    const fi = escRe(firstLow.charAt(0));
+    const middle = foldAccents(a.middle||"").trim().toLowerCase();
+    const mi = escRe(middle.charAt(0));
+    const L = escRe(last), F = escRe(firstLow);
 
     // PRIORITY 1: OpenAlex Author ID match (gold standard)
     if (a.openalexId) {
       if (paper._openalexAuthorIds?.length > 0) {
         // Paper has OpenAlex data — check IDs directly (most reliable)
-        const aIdShort = a.openalexId.replace(/.*\//, "");
-        const found = paper._openalexAuthorIds.some(id => id.endsWith(aIdShort));
+        const aIdShort = oaShortId(a.openalexId);
+        const found = paper._openalexAuthorIds.some(id => oaShortId(id) === aIdShort);
         if (found) {
           score += profile.authorScore;
-          reasons.push({ tier: "Author ✓ID", kw: `${first} ${last}`, sc: profile.authorScore });
-          matched.add(last);
+          reasons.push({ tier: "Author ✓ID", kw: `${a.first} ${a.last}`, sc: profile.authorScore });
+          matched.add(key);
           hasVerifiedAuthor = true;
         }
         continue; // Skip name matching — we have reliable ID data for this paper
@@ -946,178 +1136,200 @@ function scorePaper(paper, profile) {
 
     if (!fi) continue;
 
-    const lastRe = new RegExp(`\\b${escRe(last)}\\b`, "i");
+    const lastRe = new RegExp(`${B}${L}${E}`, "i");
     if (!lastRe.test(authStr)) continue;
 
     // Detect double initials like "A.T." or "A. W." (require at least one dot to avoid matching "et al")
-    const doubleInitRe = new RegExp(
-      `\\b${escRe(last)}[,]?\\s+[a-z]\\.\\s*[a-z]|\\b[a-z]\\.\\s*[a-z]\\.?\\s+${escRe(last)}\\b`, "i"
-    );
+    // (All sources are normalised to first-name-first, so "Last, X. Y." would be the *next* author's initials)
+    const doubleInitRe = new RegExp(`${B}[a-z]\\.\\s*[a-z]\\.?\\s+${L}${E}`, "i");
     const hasDoubleInitials = doubleInitRe.test(authStr);
 
     if (hasDoubleInitials) {
       let matched2 = false;
       if (mi) {
         const dblPatterns = [
-          new RegExp(`\\b${escRe(last)},?\\s+${fi}\\.?\\s*${mi}\\b`, "i"),
-          new RegExp(`\\b${fi}\\.?\\s*${mi}\\.?\\s+${escRe(last)}\\b`, "i"),
-          new RegExp(`\\b${escRe(firstLow)}\\s+${mi}\\.?\\s+${escRe(last)}\\b`, "i"),
-          new RegExp(`\\b${escRe(firstLow)}\\s+${escRe(middle)}\\s+${escRe(last)}\\b`, "i"),
+          new RegExp(`${B}${L},?\\s+${fi}\\.?\\s*${mi}${E}`, "i"),
+          new RegExp(`${B}${fi}\\.?\\s*${mi}\\.?\\s+${L}${E}`, "i"),
+          new RegExp(`${B}${F}\\s+${mi}\\.?\\s+${L}${E}`, "i"),
+          new RegExp(`${B}${F}\\s+${escRe(middle)}\\s+${L}${E}`, "i"),
         ];
         matched2 = dblPatterns.some(re => re.test(authStr));
       }
       if (!matched2 && firstLow.length > 2) {
-        const fullRe = new RegExp(`\\b${escRe(firstLow)}\\b[\\s,.-]+\\b${escRe(last)}\\b`, "i");
+        const fullRe = new RegExp(`${B}${F}${E}[\\s,.-]+${L}${E}`, "i");
         if (fullRe.test(authStr)) matched2 = true;
       }
       if (!matched2) continue;
     } else if (COMMON_LASTNAMES.has(lastLow)) {
       // Common name: require full first name, allow optional middle name/initial between first and last
       const fullPatterns = [
-        new RegExp(`\\b${escRe(firstLow)}\\b(?:\\s+\\S+)?\\s+${escRe(last)}\\b`, "i"),
-        new RegExp(`\\b${escRe(last)}[,\\s]+(?:\\S+\\s+)?${escRe(firstLow)}\\b`, "i")
+        new RegExp(`${B}${F}${E}(?:\\s+[^\\s,]+)?\\s+${L}${E}`, "i"),
+        new RegExp(`${B}${L}[,\\s]+(?:[^\\s,]+\\s+)?${F}${E}`, "i")
       ];
       if (!fullPatterns.some(re => re.test(authStr))) continue;
     } else {
       // Non-common name: initial or full first name match, with optional middle
       const patterns = [
-        new RegExp(`\\b${escRe(firstLow)}\\b(?:\\s+\\S+)?\\s+${escRe(last)}\\b`, "i"),
-        new RegExp(`\\b${fi}\\.?\\s+${escRe(last)}\\b`, "i"),
-        new RegExp(`\\b${escRe(last)},?\\s+${fi}\\.?\\b`, "i"),
-        new RegExp(`\\b${escRe(last)}\\s+${escRe(firstLow)}\\b`, "i")
+        new RegExp(`${B}${F}${E}(?:\\s+[^\\s,]+)?\\s+${L}${E}`, "i"),
+        new RegExp(`${B}${fi}\\.?(?:\\s*[a-z]\\.?)?\\s+${L}${E}`, "i"),
+        new RegExp(`${B}${L},?\\s+${fi}\\.?${E}`, "i"),
+        new RegExp(`${B}${L},?\\s+${fi}[a-z]?${E}`, "i"),
+        new RegExp(`${B}${L}\\s+${F}${E}`, "i")
       ];
       if (!patterns.some(re => re.test(authStr))) continue;
     }
 
     score += profile.authorScore;
-    reasons.push({ tier: "Author", kw: `${first} ${last}`, sc: profile.authorScore });
-    matched.add(last);
+    reasons.push({ tier: "Author", kw: `${a.first} ${a.last}`, sc: profile.authorScore });
+    matched.add(key);
     hasVerifiedAuthor = true;
   }
 
   // Relevance gate: paper passes if ANY of these hold
   //  - Verified author match
-  //  - tier1 keyword anywhere (very specific terms)
-  //  - tier2 keyword anywhere (reasonably specific)
+  //  - tier1 / tier2 keyword phrase anywhere (very / reasonably specific terms)
   //  - 2+ keyword matches across any tiers (cross-keyword evidence)
-  const isRelevant = hasVerifiedAuthor || hasTier1Anywhere || hasTier2Anywhere || numKwMatches >= 2;
   const hasCoreKw = hasTier1Anywhere || hasTier2Anywhere || numKwMatches >= 2;
+  const isRelevant = hasVerifiedAuthor || hasCoreKw;
 
-  return { ...paper, _score: score, _reasons: reasons, _relevant: isRelevant, _hasCoreKw: hasCoreKw, _hasAuthor: hasVerifiedAuthor };
+  return { ...paper, _score: score, _reasons: reasons.sort((x, y) => y.sc - x.sc), _relevant: isRelevant, _hasCoreKw: hasCoreKw, _hasAuthor: hasVerifiedAuthor };
 }
 
+// Merge duplicates (same DOI or same normalised title) across sources, keeping the richest metadata
 function dedup(papers) {
-  const seen = new Set();
-  return papers.filter(p => {
-    const k = (p.title||"").toLowerCase().replace(/[^a-z0-9]/g,"").slice(0,50);
-    if (!k || seen.has(k)) return false;
-    if (p.doi) { const d = p.doi.toLowerCase(); if (seen.has(d)) return false; seen.add(d); }
-    seen.add(k); return true;
-  });
+  const byKey = new Map();
+  const out = [];
+  for (const p of papers) {
+    if (!p || !p.title) continue;
+    const doiKey = p.doi ? "doi:" + cleanDoi(p.doi) : null;
+    const titleKey = "t:" + foldAccents(p.title).toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 60);
+    const existing = (doiKey && byKey.get(doiKey)) || byKey.get(titleKey);
+    if (!existing) {
+      const rec = { ...p, doi: p.doi ? cleanDoi(p.doi) : "", _sources: [p.source].filter(Boolean) };
+      out.push(rec);
+      if (doiKey) byKey.set(doiKey, rec);
+      byKey.set(titleKey, rec);
+      continue;
+    }
+    // Fill gaps / prefer richer fields
+    if ((p.abstract || "").length > (existing.abstract || "").length) existing.abstract = p.abstract;
+    if ((p.authors || "").length > (existing.authors || "").length) existing.authors = p.authors;
+    if (!existing.doi && p.doi) { existing.doi = cleanDoi(p.doi); byKey.set("doi:" + existing.doi, existing); }
+    if (p.date && (!existing.date || (p.date.length > existing.date.length))) existing.date = p.date;
+    if (p._openalexAuthorIds?.length && !existing._openalexAuthorIds?.length) existing._openalexAuthorIds = p._openalexAuthorIds;
+    if (p.source && !existing._sources.includes(p.source)) existing._sources.push(p.source);
+    // A named journal/preprint server is more informative than a database name
+    if (/^(OpenAlex|CrossRef|Semantic Scholar|Europe PMC|PubMed)$/.test(existing.source) && p.source && !/^(OpenAlex|CrossRef|Semantic Scholar|Europe PMC|PubMed)$/.test(p.source)) existing.source = p.source;
+    byKey.set(titleKey, existing);
+  }
+  return out;
 }
 
 // ============================================================
 // SEARCH ORCHESTRATION
 // ============================================================
 async function runSearch() {
-  state.searching = true; state.message = null; state.pipelineInfo = null; render();
+  if (state.searching) return;
+  if (state.isDraft) { state.message = { type: "warn", text: "Save this profile first, then run the search." }; render(); return; }
   const p = state.profile;
-  let allPapers = [];
+  const kwTotal = Object.values(p.tiers).reduce((s, t) => s + (t.keywords || []).length, 0);
+  if (!kwTotal && !(p.authors || []).length) {
+    state.message = { type: "warn", text: "This profile has no keywords or authors yet — add some in Configure (or use ✨ AI Suggest Keywords)." };
+    render(); return;
+  }
+  state.searching = true; state.message = null; state.pipelineInfo = null;
   const searchStart = performance.now();
+  const end = new Date(), start = new Date(end - p.lookbackDays * 864e5);
+  const ds = d => d.toISOString().split("T")[0];
+  const startDate = ds(start), endDate = ds(end);
+
+  // Each source runs independently and in parallel; one failing never blocks the others
+  const sources = [
+    { name: "bioRxiv",          run: () => searchBiorxiv(startDate, endDate, p) },
+    { name: "PubMed",           run: () => searchPubmed(searchTerms(p, { t2: 12 }), p.lookbackDays) },
+    { name: "Europe PMC",       run: () => searchEuropePmc(searchTerms(p, { t2: Infinity, t3: 6 }), startDate, endDate) },
+    { name: "OpenAlex",         run: () => searchOpenAlex(searchTerms(p, { t2: Infinity, t3: 10 }), startDate, endDate, p.authors) },
+    { name: "CrossRef",         run: () => searchCrossRef(searchTerms(p, { t2: 4 }), startDate, endDate, p.authors) },
+    { name: "Semantic Scholar", run: () => searchSemanticScholar(searchTerms(p, { t2: 3 }), startDate, endDate) }
+  ];
+  const useGemini = (state.searchMode === "gemini" || state.searchMode === "both") && !!state.geminiKey;
+  const useAnthropic = (state.searchMode === "anthropic" || state.searchMode === "both") && !!state.apiKey;
+  if (useGemini || useAnthropic) {
+    const queries = buildAnthropicQueries(p);
+    const engines = [useGemini && ["Gemini", q => searchGemini(q.prompt, state.geminiKey)], useAnthropic && ["Claude", q => searchAnthropic(q.prompt, state.apiKey)]].filter(Boolean);
+    for (const [engine, fn] of engines) {
+      sources.push({ name: `${engine} search`, run: async () => {
+        const found = [];
+        await mapLimit(queries, 2, async q => { try { found.push(...await fn(q)); } catch(e) { console.warn(engine, "query failed:", e); if (!found._err) found._err = e; } });
+        if (!found.length && found._err) throw found._err;
+        // Only keep AI-reported papers that resolve to a real database record
+        const verified = await verifyAiPapers(dedup(found), startDate);
+        verified._note = `${verified.length}/${dedup(found).length} verified`;
+        return verified;
+      }});
+    }
+  }
+
+  state.sourceStatus = Object.fromEntries(sources.map(s => [s.name, { status: "running" }]));
+  state.progress = { current: 0, total: sources.length, label: "Querying databases in parallel…" };
+  render();
+
+  const settled = await Promise.all(sources.map(async s => {
+    const t0 = performance.now();
+    try {
+      const papers = await s.run();
+      state.sourceStatus[s.name] = { status: "done", count: papers.length, note: papers._note || "", secs: (performance.now() - t0) / 1000 };
+      return papers;
+    } catch(e) {
+      console.warn(`${s.name} failed:`, e);
+      state.sourceStatus[s.name] = { status: "error", error: e.message || String(e) };
+      return [];
+    } finally {
+      state.progress.current++;
+      if (state.view === "results") render();
+    }
+  }));
 
   try {
-    let sourceCounts = {};
-    // Direct APIs always run (5 database sources)
-    {
-      // Direct API queries — 5 sources
-      const end = new Date(), start = new Date(end - p.lookbackDays * 864e5);
-      const ds = d => d.toISOString().split("T")[0];
-      const allKw = [...(p.tiers.tier1?.keywords||[]), ...(p.tiers.tier2?.keywords||[]).slice(0,6)];
-      const t1Kw = p.tiers.tier1?.keywords || [];
-      const t2Kw = p.tiers.tier2?.keywords || [];
-      const t3Kw = p.tiers.tier3?.keywords || [];
-
-      state.progress = { current: 1, total: 6, label: "Querying bioRxiv (preprints)…" }; render();
-      try { const bp = await searchBiorxiv(ds(start), ds(end), p); allPapers.push(...bp); sourceCounts.bioRxiv = bp.length; } catch(e) { console.warn("bioRxiv failed:", e); sourceCounts.bioRxiv = "error"; }
-
-      state.progress = { current: 2, total: 6, label: "Querying PubMed (bio/neuro journals)…" }; render();
-      try {
-        // PubMed needs shorter, broader terms — long phrases rarely match verbatim
-        const pmBroad = [
-          "nanoholotomography", "holotomography", "nanotomography",
-          "ptychography", "holographic tomography", "X-ray connectomics"
-        ];
-        const pmKw = [...new Set([...pmBroad, ...t1Kw.slice(0,4), ...t2Kw.slice(0,4)])];
-        const pp = await searchPubmed(pmKw, p.lookbackDays);
-        allPapers.push(...pp); sourceCounts.PubMed = pp.length;
-      } catch(e) { console.warn("PubMed failed:", e); sourceCounts.PubMed = "error"; }
-
-      state.progress = { current: 3, total: 6, label: "Querying OpenAlex (all journals + author search)…" }; render();
-      try {
-        // Add short broad terms alongside specific tier keywords
-        const oaBroad = ["nanoholotomography","holotomography","nanotomography","ptychography brain","X-ray connectomics","synchrotron brain imaging"];
-        const oaKw = [...new Set([...oaBroad, ...t1Kw, ...t2Kw.slice(0,6), ...t3Kw.slice(0,4)])];
-        const oap = await searchOpenAlex(oaKw, ds(start), ds(end), p.authors);
-        allPapers.push(...oap); sourceCounts.OpenAlex = oap.length;
-      } catch(e) { console.warn("OpenAlex failed:", e); sourceCounts.OpenAlex = "error"; }
-
-      state.progress = { current: 4, total: 6, label: "Querying CrossRef (physics/optics journals + authors)…" }; render();
-      try {
-        const crKw = [...t1Kw.slice(0,3), ...t2Kw.slice(0,5)];
-        const crp = await searchCrossRef(crKw, ds(start), p.authors);
-        allPapers.push(...crp); sourceCounts.CrossRef = crp.length;
-      } catch(e) { console.warn("CrossRef failed:", e); sourceCounts.CrossRef = "error"; }
-
-      state.progress = { current: 5, total: 6, label: "Querying Semantic Scholar (200M+ papers)…" }; render();
-      try {
-        const s2Kw = [...new Set(["nanoholotomography","holotomography","nanotomography","ptychography","X-ray connectomics", ...t1Kw.slice(0,4), ...t2Kw.slice(0,4)])];
-        const s2p = await searchSemanticScholar(s2Kw, ds(start), ds(end), p.authors);
-        allPapers.push(...s2p); sourceCounts.SemanticScholar = s2p.length;
-      } catch(e) { console.warn("Semantic Scholar failed:", e); sourceCounts.SemanticScholar = "error"; }
-      state.progress.current = 6;
-    }
-
-    // AI-powered search adds on top of direct API results
-    if (state.searchMode !== "direct" && (state.geminiKey || state.apiKey)) {
-      const useGemini = (state.searchMode === "gemini" || state.searchMode === "both") && state.geminiKey;
-      const useAnthropic = (state.searchMode === "anthropic" || state.searchMode === "both") && state.apiKey;
-      const queries = buildAnthropicQueries(p);
-      const aiLabel = useGemini && useAnthropic ? "Gemini + Claude" : useGemini ? "Gemini" : "Claude";
-      for (let i = 0; i < queries.length; i++) {
-        state.progress = { current: i + 1, total: queries.length, label: `${aiLabel}: ${queries[i].label}` }; render();
-        if (useGemini) {
-          try { const gp = await searchGemini(queries[i].prompt, state.geminiKey); allPapers.push(...gp); } catch(e) { console.warn("Gemini query failed:", e); }
-        }
-        if (useAnthropic) {
-          try { const ap = await searchAnthropic(queries[i].prompt, state.apiKey); allPapers.push(...ap); } catch(e) { console.warn("Anthropic query failed:", e); }
-        }
-      }
-    }
-
-    if (state.searchMode !== "direct" && !state.geminiKey && !state.apiKey) {
-      // Don't block — direct results still available, just warn
-      state.message = { type: "warn", text: "No AI key configured — showing direct API results only. Add a Gemini or Anthropic key in Configure for AI-powered search." };
-    }
-
-    const deduplicated = dedup(allPapers);
-    const scored = deduplicated.map(pp => scorePaper(pp, p))
+    const allPapers = settled.flat();
+    const candidates = dedup(allPapers);
+    const scored = candidates.map(pp => scorePaper(pp, p))
       .filter(pp => pp._relevant && pp._score >= p.minScore)
-      .sort((a,b) => b._score - a._score);
+      .sort((a,b) => b._score - a._score || (b.date||"").localeCompare(a.date||""));
+
+    // "New" = not seen in any earlier search of this profile
+    const now = Date.now();
+    for (const pp of scored) {
+      const k = paperKey(pp);
+      pp._new = !state.marks.seen[k];
+      if (pp._new) state.marks.seen[k] = now;
+    }
+    // Keep the seen-list from growing forever (drop entries older than a year)
+    for (const [k, t] of Object.entries(state.marks.seen)) if (now - t > 365 * 864e5) delete state.marks.seen[k];
+    saveMarks();
+
     state.results = scored;
     saveResults(scored);
+
+    const failed = Object.entries(state.sourceStatus).filter(([, s]) => s.status === "error").map(([n]) => n);
+    const failNote = failed.length ? ` · ⚠ ${failed.join(", ")} failed (see pipeline line)` : "";
+    const aiNote = state.searchMode !== "direct" && !useGemini && !useAnthropic
+      ? " · No AI key for the selected search mode, so only the databases were searched." : "";
     if (!scored.length && !allPapers.length) {
-      state.message = { type: "warn", text: "No papers found. Try expanding keywords or increasing the lookback period." };
+      state.message = { type: "warn", text: "No papers found. Try expanding keywords or increasing the lookback period." + failNote + aiNote };
     } else if (!scored.length) {
-      state.message = { type: "warn", text: `Found ${allPapers.length} candidates but none passed the relevance filter. Papers must have a tier1/tier2 keyword in the title OR a verified author match (last name + first name/initial). Add more keywords or check author name spellings.` };
+      state.message = { type: "warn", text: `Found ${candidates.length} candidates but none passed the relevance filter (a tier 1/2 keyword phrase, 2+ keyword matches, or a watched author). Add keywords, lower Min Score, or check author spellings.` + failNote + aiNote };
     } else {
-      const authMatches = scored.filter(p => p._hasAuthor).length;
-      const kwMatches = scored.filter(p => p._hasCoreKw && !p._hasAuthor).length;
-      const srcInfo = Object.entries(sourceCounts).map(([k,v]) => `${k}: ${v}`).join(' · ');
+      const authMatches = scored.filter(x => x._hasAuthor).length;
+      const kwMatches = scored.filter(x => x._hasCoreKw && !x._hasAuthor).length;
+      const newCount = scored.filter(x => x._new).length;
       const duration = ((performance.now() - searchStart) / 1000).toFixed(1);
-      state.message = { type: "success", text: `Found ${scored.length} relevant papers from ${allPapers.length} candidates · ${authMatches} via authors · ${kwMatches} via keywords · ${duration}s` };
-      state.pipelineInfo = srcInfo;
+      state.message = { type: failed.length ? "warn" : "success", text: `Found ${scored.length} relevant papers (${newCount} new since last search) from ${candidates.length} unique candidates · ${authMatches} via authors · ${kwMatches} via keywords · ${duration}s` + failNote + aiNote };
     }
+    state.pipelineInfo = Object.entries(state.sourceStatus).map(([k, s]) =>
+      s.status === "error" ? `${k}: error (${s.error})` : `${k}: ${s.count}${s.note ? ` (${s.note})` : ""}`).join(" · ");
   } catch(e) {
+    console.error(e);
     state.message = { type: "warn", text: "Search error: " + e.message };
   }
   state.searching = false; render();
@@ -1163,46 +1375,17 @@ async function generateReview(paper) {
   if (!state.apiKey) {
     return "**API key required for paper reviews.**\n\nGo to the Configure tab and enter your Anthropic API key. The review feature uses Claude with web search to fetch and critically analyze the full paper.\n\nThe key is stored only in your browser's localStorage.";
   }
-  const prompt = `Critically review this scientific paper:
-
-Title: ${paper.title}
-Authors: ${paper.authors}
-Date: ${paper.date}
-Source: ${paper.source}
-URL: ${paper.url}
-DOI: ${paper.doi || "N/A"}
-
-Abstract: ${paper.abstract || "Not available — please search for the paper to find its abstract."}
-
-Search for this paper to get the full details, then provide your rigorous critical review.`;
-
-  try {
-    const r = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-api-key": state.apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514", max_tokens: 4000,
-        system: REVIEW_SYSTEM,
-        messages: [{ role: "user", content: prompt }],
-        tools: [{ type: "web_search_20250305", name: "web_search" }]
-      })
-    });
-    const data = await r.json();
-    if (data.error) return `**API Error:** ${data.error.message || "Unknown error"}\n\nCheck your API key in the Configure tab.`;
-    if (!data.content) return "No response received.";
-    return data.content.filter(b => b.type === "text").map(b => b.text).join("\n");
-  } catch(e) {
-    return `**Request failed:** ${e.message}\n\nEnsure you have an internet connection and a valid API key.`;
-  }
+  return callClaude(buildReviewPrompt(paper), REVIEW_SYSTEM, state.apiKey, { effort: "medium" });
 }
 
 function renderMarkdown(md) {
-  // Minimal markdown → HTML renderer for the review panel
-  let html = md
-    .replace(/^## (.+)$/gm, '<h2>$1</h2>')
-    .replace(/^### (.+)$/gm, '<h3 style="font-size:15px;color:var(--navy);margin:16px 0 6px">$1</h3>')
+  // Minimal markdown → HTML renderer for the review panel.
+  // Model output is untrusted (it read web pages), so escape everything before adding our own tags.
+  let html = esc(String(md || "")).replace(/\r\n/g, "\n")
+    .replace(/^#{3,} (.+)$/gm, '<h3 style="font-size:15px;color:var(--navy);margin:16px 0 6px">$1</h3>')
+    .replace(/^#{1,2} (.+)$/gm, '<h2>$1</h2>')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/\*(?!\s)(.+?)\*/g, '<em>$1</em>')
     .replace(/\[High Confidence\]/g, '<span class="confidence-tag confidence-high">High Confidence</span>')
     .replace(/\[Medium Confidence\]/g, '<span class="confidence-tag confidence-med">Medium Confidence</span>')
     .replace(/\[Speculative\]/g, '<span class="confidence-tag confidence-low">Speculative</span>')
@@ -1212,11 +1395,12 @@ function renderMarkdown(md) {
   // Convert numbered lists
   html = html.replace(/^(\d+)\.\s+(.+)$/gm, '<li>$2</li>');
   // Convert bullet lists
-  html = html.replace(/^[-•]\s+(.+)$/gm, '<li>$1</li>');
+  html = html.replace(/^\s*[-•*]\s+(.+)$/gm, '<li>$1</li>');
   // Wrap consecutive <li> in <ul> or <ol>
   html = html.replace(/((?:<li>.*<\/li>\n?)+)/g, '<ul>$1</ul>');
   // Convert remaining line breaks to paragraphs
   html = html.split('\n\n').map(block => {
+    block = block.trim();
     if (block.startsWith('<h') || block.startsWith('<ul') || block.startsWith('<ol')) return block;
     if (block.trim() === '') return '';
     return `<p>${block.replace(/\n/g, '<br>')}</p>`;
@@ -1267,8 +1451,13 @@ RULES:
 - Be 100% objective — no sycophancy`;
 }
 
-function openReview(paperIdx) {
-  const paper = state.results[paperIdx];
+// Papers are looked up by key, not list position, so sorting/filtering can't open the wrong paper
+function findPaper(key) {
+  return (state.results || []).find(p => paperKey(p) === key) || state.marks.starred[key] || null;
+}
+
+function openReview(key) {
+  const paper = findPaper(key);
   if (!paper) return;
   const panel = document.getElementById("review-panel");
   const overlay = document.getElementById("review-overlay");
@@ -1284,19 +1473,21 @@ function openReview(paperIdx) {
   const hasAnthropic = !!state.apiKey;
 
   if (hasGemini || hasAnthropic) {
-    // Automated review via Gemini or Anthropic
-    const engine = hasGemini ? "Gemini" : "Claude";
+    // Automated review — Claude when an Anthropic key is set, otherwise Gemini
+    const engine = hasAnthropic ? "Claude" : "Gemini";
     bodyEl.innerHTML = `<div style="text-align:center;padding:40px 0"><div class="spinner"></div><div style="font-size:14px;color:var(--muted);margin-top:12px">Analyzing paper via ${engine}…</div><div style="font-size:12px;color:#aaa;margin-top:6px">${engine} is searching for and reading the paper,<br>then generating a critical review</div></div>`;
 
     const prompt = buildReviewPrompt(paper);
-    const reviewPromise = hasGemini
-      ? callGemini(prompt, REVIEW_SYSTEM, state.geminiKey)
-      : generateReview(paper);
+    const reviewPromise = hasAnthropic
+      ? generateReview(paper)
+      : callGemini(prompt, REVIEW_SYSTEM, state.geminiKey);
+    const token = (bodyEl.dataset.token = String(Date.now()));
 
     reviewPromise.then(review => {
+      if (bodyEl.dataset.token !== token) return;  // user opened a different paper meanwhile
       bodyEl.innerHTML = `
         <div style="background:rgba(19,78,74,0.05);border:1px solid rgba(19,78,74,0.2);border-radius:8px;padding:12px 16px;margin-bottom:20px;font-size:12px;color:var(--teal);font-family:var(--font-mono)">
-          <strong>Paper:</strong> <a href="${paper.url}" target="_blank" style="color:var(--teal)">${esc(paper.title)}</a><br>
+          <strong>Paper:</strong> <a href="${esc(safeUrl(paper.url))}" target="_blank" rel="noopener" style="color:var(--teal)">${esc(paper.title)}</a><br>
           <strong>Source:</strong> ${esc(paper.source)} · ${esc(paper.date)}${paper.doi ? ` · DOI: ${esc(paper.doi)}` : ''}<br>
           <strong>Reviewed by:</strong> ${engine} with web search
         </div>
@@ -1305,14 +1496,16 @@ function openReview(paperIdx) {
           AI-generated review — always verify against the original paper.
         </div>`;
     }).catch(err => {
+      if (bodyEl.dataset.token !== token) return;
       bodyEl.innerHTML = `<div class="alert alert-warn">Review failed: ${esc(err.message)}</div>`;
     });
   } else {
     // No API key → copy-to-Claude workflow
+    bodyEl.dataset.token = "";
     const prompt = buildReviewPrompt(paper);
     bodyEl.innerHTML = `
       <div style="background:rgba(19,78,74,0.05);border:1px solid rgba(19,78,74,0.2);border-radius:8px;padding:12px 16px;margin-bottom:20px;font-size:12px;color:var(--teal);font-family:var(--font-mono)">
-        <strong>Paper:</strong> <a href="${paper.url}" target="_blank" style="color:var(--teal)">${esc(paper.title)}</a><br>
+        <strong>Paper:</strong> <a href="${esc(safeUrl(paper.url))}" target="_blank" rel="noopener" style="color:var(--teal)">${esc(paper.title)}</a><br>
         <strong>Source:</strong> ${esc(paper.source)} · ${esc(paper.date)}${paper.doi ? ` · DOI: ${esc(paper.doi)}` : ''}
       </div>
 
@@ -1320,7 +1513,7 @@ function openReview(paperIdx) {
         <div style="font-size:36px;margin-bottom:12px">📋</div>
         <h2 style="border:none;margin:0 0 8px;font-size:18px">Review via Claude.ai</h2>
         <p style="color:var(--muted);font-size:13px;max-width:420px;margin:0 auto 16px">
-          For automated reviews, add a <strong>Gemini API key</strong> in the Configure tab (free from Google AI Studio). Or copy this prompt to Claude.ai:
+          For automated reviews, add an <strong>Anthropic</strong> or <strong>Gemini</strong> API key in the Configure tab. Or copy this prompt into Claude.ai (works with your Claude Team plan):
         </p>
         <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
           <button class="btn btn-primary" id="btn-copy-prompt" style="font-size:14px;padding:14px 28px">
@@ -1373,34 +1566,64 @@ function closeReview() {
 // ============================================================
 function generateDigest(papers, profile) {
   const now = new Date().toLocaleDateString("en-GB", { day:"numeric", month:"long", year:"numeric" });
-  let t = `${profile.name} — Weekly Literature Digest\n${now} — Last ${profile.lookbackDays} days — ${papers.length} papers\n${"=".repeat(55)}\n\n`;
+  const newCount = papers.filter(p => p._new).length;
+  let t = `${profile.name} — Literature Digest\n${now} — Last ${profile.lookbackDays} days — ${papers.length} papers (${newCount} new)\n${"=".repeat(55)}\n\n`;
   papers.forEach((p, i) => {
     const tier = p._score >= 10 ? "HIGH" : p._score >= 5 ? "MED" : "LOW";
-    t += `[${i+1}] [${tier}] ${p.title}\n`;
-    t += `  ${(p.authors||"").slice(0,100)}\n`;
-    t += `  ${p.source} | ${p.date} | Score ${p._score}\n`;
-    t += `  ${p.url}\n\n`;
+    const why = (p._reasons || []).filter(r => r.tier !== "Diversity").slice(0, 3).map(r => r.kw).join("; ");
+    t += `[${i+1}] [${tier}]${p._new ? " [NEW]" : ""} ${p.title}\n`;
+    t += `  ${(p.authors||"").slice(0,120)}${(p.authors||"").length > 120 ? "…" : ""}\n`;
+    t += `  ${p.source} | ${p.date} | Score ${p._score}${why ? ` | ${why}` : ""}\n`;
+    t += `  ${p.doi ? `https://doi.org/${p.doi}` : p.url}\n\n`;
   });
   return t;
 }
 
+async function copyText(text, okMsg) {
+  try {
+    await navigator.clipboard.writeText(text);
+    state.message = { type: "success", text: okMsg };
+  } catch {
+    state.message = { type: "warn", text: "Clipboard access was blocked by the browser — select and copy manually." };
+  }
+  render();
+}
+
 function emailDigest() {
-  if (!state.results) return;
-  const digest = generateDigest(state.results, state.profile);
-  const subj = encodeURIComponent(`${state.profile.name} — Lit Digest — ${new Date().toLocaleDateString()}`);
-  const recipients = (state.profile.emailRecipients || "").trim();
-  const mailto = `mailto:${encodeURIComponent(recipients)}?subject=${subj}&body=${encodeURIComponent(digest.slice(0, 1800))}`;
-  navigator.clipboard.writeText(digest).then(() => {
-    state.message = { type: "success", text: "Full digest copied to clipboard. Email client opening…" };
-    render();
-  });
-  window.open(mailto, "_self");
+  const papers = visiblePapers();
+  if (!papers.length) return;
+  const digest = generateDigest(papers, state.profile);
+  const subj = encodeURIComponent(`${state.profile.name} — Lit Digest — ${new Date().toLocaleDateString("en-GB")}`);
+  const recipients = splitList(state.profile.emailRecipients).map(encodeURIComponent).join(",");
+  // mailto bodies are length-limited in most mail clients; the full digest goes to the clipboard
+  const body = digest.length > 1800 ? digest.slice(0, 1800) + "\n\n[…truncated — paste the full digest from your clipboard]" : digest;
+  copyText(digest, "Full digest copied to clipboard. Email client opening…");
+  window.location.href = `mailto:${recipients}?subject=${subj}&body=${encodeURIComponent(body)}`;
+}
+
+// BibTeX for reference managers (Zotero, Mendeley, EndNote all import it)
+function toBibtex(papers) {
+  const used = new Set();
+  return papers.map(p => {
+    const first = foldAccents((p.authors || "").split(",")[0] || "anon").trim().split(/\s+/).pop().replace(/[^A-Za-z]/g, "") || "anon";
+    const year = (p.date || "").slice(0, 4) || "nd";
+    let key = `${first}${year}`; let n = 0;
+    while (used.has(key)) key = `${first}${year}${String.fromCharCode(97 + n++)}`;
+    used.add(key);
+    const f = s => String(s || "").replace(/[{}]/g, "");
+    const authors = (p.authors || "").split(/\s*,\s*/).filter(Boolean).join(" and ");
+    return `@article{${key},\n  title = {${f(p.title)}},\n  author = {${f(authors)}},\n  journal = {${f(p.source)}},\n  year = {${year}},\n` +
+      (p.doi ? `  doi = {${f(p.doi)}},\n` : "") + `  url = {${f(p.doi ? "https://doi.org/" + p.doi : p.url)}}\n}`;
+  }).join("\n\n");
 }
 
 // ============================================================
 // RENDERING
 // ============================================================
-const esc = s => { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; };
+// Escapes for both text and attribute contexts (quotes included)
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+// Only allow http(s) links — AI-returned URLs are untrusted
+const safeUrl = u => /^https?:\/\//i.test(String(u || "").trim()) ? String(u).trim() : "#";
 const $ = id => document.getElementById(id);
 
 function render() {
@@ -1432,9 +1655,7 @@ function render() {
   const resultCount = state.results?.length || 0;
   document.querySelectorAll(".tab[data-tab]").forEach(t => {
     t.classList.toggle("active", t.dataset.tab === state.view);
-    if (t.dataset.tab === "results" && resultCount > 0) {
-      t.textContent = `Results (${resultCount})`;
-    }
+    if (t.dataset.tab === "results") t.textContent = resultCount > 0 ? `Results (${resultCount})` : "Results";
   });
 
   // Content
@@ -1463,106 +1684,171 @@ function render() {
   // Note: AI Suggest button uses inline onclick="aiSuggestKeywords()" — no direct binding needed
 }
 
+// Papers shown in the current list mode + text filter (also what Copy/Email/Export use)
+function visiblePapers() {
+  const m = state.marks;
+  let list = state.listMode === "starred"
+    ? Object.values(m.starred).sort((a, b) => (b._starredAt || 0) - (a._starredAt || 0))
+    : (state.results || []).filter(p => {
+        const k = paperKey(p);
+        if (state.listMode === "hidden") return !!m.hidden[k];
+        if (m.hidden[k]) return false;
+        return state.listMode === "new" ? p._new : true;
+      });
+  const q = foldAccents(state.filterText || "").toLowerCase().trim();
+  if (q) {
+    const terms = q.split(/\s+/);
+    list = list.filter(p => {
+      const hay = foldAccents(`${p.title} ${p.authors} ${p.source} ${p.abstract} ${(p._reasons || []).map(r => r.kw).join(" ")}`).toLowerCase();
+      return terms.every(t => hay.includes(t));
+    });
+  }
+  if (state.sortBy === "date") list = [...list].sort((a, b) => (b.date || "").localeCompare(a.date || "") || b._score - a._score);
+  return list;
+}
+
 function renderResults() {
   let html = "";
   // Controls
   html += `<div class="flex gap-2 mt-3 mb-4" style="flex-wrap:wrap;align-items:center">`;
-  html += `<button class="btn btn-primary" id="btn-search" ${state.searching?"disabled":""}>${state.results ? "↻ Refresh Search" : "▶ Run Weekly Search"}</button>`;
-  if (state.searchDate) html += `<span style="font-size:12px;color:var(--muted);font-family:var(--font-mono)">Last: ${new Date(state.searchDate).toLocaleDateString("en-GB",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}</span>`;
-  if (state.results?.length) {
-    html += `<button class="btn btn-secondary btn-sm" id="btn-copy">📋 Copy Digest</button>`;
-    html += `<button class="btn btn-secondary btn-sm" id="btn-email-now">📧 Email Digest</button>`;
-    html += `<button class="btn btn-secondary btn-sm" id="btn-toggle-sort" title="Toggle sort order">Sort: ${state.sortBy === "score" ? "Score ↓" : "Date ↓"}</button>`;
-  }
+  html += `<button class="btn btn-primary" id="btn-search" ${state.searching || state.isDraft ?"disabled":""}>${state.results ? "↻ Refresh Search" : "▶ Run Search"}</button>`;
+  if (state.searchDate) html += `<span style="font-size:12px;color:var(--muted);font-family:var(--font-mono)">Last: ${new Date(state.searchDate).toLocaleDateString("en-GB",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})} · ${state.profile.lookbackDays}-day window</span>`;
   html += `</div>`;
 
-  if (state.message) html += `<div class="alert alert-${state.message.type}">${esc(state.message.text)}</div>`;
-  if (state.pipelineInfo) html += `<div style="font-family:var(--font-mono);font-size:11px;color:var(--muted);margin:-8px 0 16px 2px">Pipeline: ${esc(state.pipelineInfo)}</div>`;
+  if (state.message) html += `<div class="alert alert-${esc(state.message.type)}">${esc(state.message.text)}</div>`;
+  if (state.pipelineInfo && !state.searching) html += `<div style="font-family:var(--font-mono);font-size:11px;color:var(--muted);margin:-8px 0 16px 2px">Pipeline: ${esc(state.pipelineInfo)}</div>`;
 
   if (state.searching) {
     html += `<div class="card text-center"><div class="spinner"></div>`;
     html += `<div style="font-weight:600;color:var(--navy);margin-bottom:6px">${esc(state.progress.label)}</div>`;
-    html += `<div style="font-size:12px;color:var(--muted)">Step ${state.progress.current} of ${state.progress.total}</div>`;
+    html += `<div style="font-size:12px;color:var(--muted)">${state.progress.current} of ${state.progress.total} sources finished</div>`;
     html += `<div class="progress-bar"><div class="progress-fill" style="width:${(state.progress.current/Math.max(state.progress.total,1))*100}%"></div></div>`;
-    html += `<div style="font-size:11px;color:#aaa;margin-top:10px">Only verified papers with real URLs will be shown</div></div>`;
+    html += `<div class="source-grid">`;
+    for (const [name, s] of Object.entries(state.sourceStatus || {})) {
+      const txt = s.status === "running" ? "…" : s.status === "error" ? "failed" : `${s.count}`;
+      html += `<span class="source-chip ${s.status}" title="${esc(s.error || s.note || "")}">${esc(name)}: ${esc(txt)}</span>`;
+    }
+    html += `</div>`;
+    html += `<div style="font-size:11px;color:#aaa;margin-top:10px">Only papers that exist in a real database are shown</div></div>`;
     return html;
   }
 
-  if (!state.results) {
+  if (!state.results && state.listMode !== "starred") {
     html += `<div class="card text-center" style="padding:40px">`;
     html += `<div style="font-size:40px;margin-bottom:16px">🔬</div>`;
     html += `<h2 style="font-family:var(--font-head);font-size:20px;color:var(--navy);margin-bottom:8px">Ready to Search</h2>`;
-    html += `<p style="color:var(--muted);max-width:440px;margin:0 auto 16px;line-height:1.5">Click <strong>Run Weekly Search</strong> to find papers from the last ${state.profile.lookbackDays} days. Every result links to its real source — no hallucinated papers.</p>`;
+    html += `<p style="color:var(--muted);max-width:440px;margin:0 auto 16px;line-height:1.5">Click <strong>Run Search</strong> to find papers from the last ${state.profile.lookbackDays} days. Every result links to its real source — no hallucinated papers.</p>`;
     html += `<div style="font-family:var(--font-mono);font-size:12px;color:#aaa">`;
-    html += state.searchMode === "direct" ? "Direct: bioRxiv · PubMed · OpenAlex · CrossRef · Semantic Scholar" : state.searchMode === "gemini" ? "Direct APIs + Gemini Search" : state.searchMode === "anthropic" ? "Direct APIs + Claude Search" : "All sources (Direct + Gemini + Claude)";
+    const direct = "bioRxiv · PubMed · Europe PMC · OpenAlex · CrossRef · Semantic Scholar";
+    html += state.searchMode === "direct" ? direct : state.searchMode === "gemini" ? direct + " + Gemini" : state.searchMode === "anthropic" ? direct + " + Claude" : direct + " + Gemini + Claude";
     html += `</div></div>`;
+    if (Object.keys(state.marks.starred).length) html += renderListBar([]);
     return html;
   }
 
-  const sorted = state.sortBy === "date"
-    ? [...state.results].sort((a,b) => (b.date||"").localeCompare(a.date||""))
-    : state.results; // already sorted by score
-  const high = sorted.filter(p => p._score >= 10);
-  const med = sorted.filter(p => p._score >= 5 && p._score < 10);
-  const low = sorted.filter(p => p._score < 5);
+  const visible = visiblePapers();
+  html += renderListBar(visible);
 
-  // Summary
-  html += `<div class="card flex gap-3" style="flex-wrap:wrap;align-items:center;font-family:var(--font-mono);font-size:13px">`;
-  html += `<span style="font-weight:700;color:var(--navy)">${state.results.length} papers</span>`;
-  if (high.length) html += `<span style="color:var(--green)">● ${high.length} high</span>`;
-  if (med.length) html += `<span style="color:var(--blue)">● ${med.length} medium</span>`;
-  if (low.length) html += `<span style="color:var(--amber)">● ${low.length} lower</span>`;
-  html += `</div>`;
-
-  if (!state.results.length) {
-    html += `<div class="card text-center" style="color:var(--muted)">No papers matched this week. Normal for niche fields — try expanding lookback or keywords.</div>`;
+  if (!visible.length) {
+    const why = state.filterText ? "No papers match the filter."
+      : state.listMode === "new" ? "Nothing new since your last search."
+      : state.listMode === "starred" ? "No starred papers yet — click ☆ on a paper to keep it in your reading list."
+      : state.listMode === "hidden" ? "No hidden papers."
+      : "No papers matched this window. Normal for niche fields — try expanding the lookback or keywords.";
+    html += `<div class="card text-center" style="color:var(--muted)">${why}</div>`;
     return html;
   }
 
-  const renderGroup = (papers, label, color, startIdx) => {
-    if (!papers.length) return "";
-    let g = `<h3 class="section-head" style="color:${color};border-bottom-color:${color}">${label} (${papers.length})</h3>`;
-    papers.forEach((p, i) => {
-      const cls = p._score >= 10 ? "high" : p._score >= 5 ? "med" : "low";
-      const scoreCls = p._score >= 10 ? "high" : p._score >= 5 ? "med" : "low";
-      g += `<div class="paper-card ${cls}">`;
-      g += `<a href="${esc(p.url)}" target="_blank" class="paper-title">${esc(p.title)}</a>`;
-      g += `<div class="paper-authors">${esc((p.authors||"").slice(0,150))}${(p.authors||"").length>150?"…":""}</div>`;
-      g += `<div class="paper-meta">`;
-      g += `<span class="badge badge-source">${esc(p.source)}</span>`;
-      g += `<span>${esc(p.date)}</span>`;
-      g += `<span class="badge badge-score-${scoreCls}">Score: ${p._score}</span>`;
-      if (p.doi) g += `<span style="color:#bbb">DOI: ${esc(p.doi)}</span>`;
-      g += `<button class="btn-review" data-review-idx="${startIdx + i}">📖 Review</button>`;
+  const renderCard = p => {
+    const k = paperKey(p);
+    const cls = p._score >= 10 ? "high" : p._score >= 5 ? "med" : "low";
+    const starred = !!state.marks.starred[k], hidden = !!state.marks.hidden[k];
+    let g = `<div class="paper-card ${cls}">`;
+    g += `<div class="paper-head"><a href="${esc(safeUrl(p.url))}" target="_blank" rel="noopener" class="paper-title">${p._new ? `<span class="badge-new">NEW</span>` : ""}${esc(p.title)}</a>`;
+    g += `<div class="paper-actions">`;
+    g += `<button class="icon-btn ${starred ? "on" : ""}" data-star="${esc(k)}" title="${starred ? "Remove from reading list" : "Save to reading list"}">${starred ? "★" : "☆"}</button>`;
+    g += `<button class="icon-btn" data-hide="${esc(k)}" title="${hidden ? "Show again" : "Not relevant — hide"}">${hidden ? "↺" : "✕"}</button>`;
+    g += `</div></div>`;
+    g += `<div class="paper-authors">${esc((p.authors||"").slice(0,180))}${(p.authors||"").length>180?"…":""}</div>`;
+    g += `<div class="paper-meta">`;
+    g += `<span class="badge badge-source" title="${esc((p._sources || [p.source]).join(" · "))}">${esc(p.source)}</span>`;
+    if ((p._sources || []).length > 1) g += `<span title="${esc(p._sources.join(" · "))}">+${p._sources.length - 1} source${p._sources.length > 2 ? "s" : ""}</span>`;
+    g += `<span>${esc(p.date)}</span>`;
+    if (p._score != null) g += `<span class="badge badge-score-${cls}">Score: ${p._score}</span>`;
+    if (p.doi) g += `<a href="https://doi.org/${esc(encodeURI(p.doi))}" target="_blank" rel="noopener" style="color:#94a3b8">DOI: ${esc(p.doi)}</a>`;
+    g += `<button class="btn-review" data-review-key="${esc(k)}">📖 Review</button>`;
+    g += `</div>`;
+    if (p._reasons?.length) {
+      g += `<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px">`;
+      p._reasons.slice(0,6).forEach(r => {
+        const c = r.tier.startsWith("Author") ? "var(--purple)"
+          : r.tier==="Diversity" ? "#b15968"
+          : r.tierKey === "tier1" || r.tier===state.profile.tiers.tier1?.label ? "var(--green)"
+          : r.tierKey === "tier2" || r.tier===state.profile.tiers.tier2?.label ? "var(--blue)"
+          : "var(--amber)";
+        g += `<span class="tag" style="background:color-mix(in srgb, ${c} 8%, transparent);color:${c};border:1px solid color-mix(in srgb, ${c} 20%, transparent)">${esc(r.tier)}: ${esc(r.kw)} <b>+${r.sc}</b></span>`;
+      });
       g += `</div>`;
-      if (p._reasons?.length) {
-        g += `<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px">`;
-        p._reasons.slice(0,6).forEach(r => {
-          const c = r.tier.startsWith("Author") ? "var(--purple)"
-            : r.tier==="Diversity" ? "#b15968"
-            : r.tier===state.profile.tiers.tier1?.label ? "var(--green)"
-            : r.tier===state.profile.tiers.tier2?.label ? "var(--blue)"
-            : "var(--amber)";
-          g += `<span class="tag" style="background:${c}15;color:${c};border:1px solid ${c}30">${esc(r.tier)}: ${esc(r.kw)}</span>`;
-        });
-        g += `</div>`;
-      }
-      if (p.abstract) {
-        const short = p.abstract.length > 250;
-        g += `<div class="paper-abstract" data-full="${short?0:1}" style="max-height:${short?"55px":"none"}">${esc(p.abstract)}</div>`;
-        if (short) g += `<button class="toggle-abstract">Show more</button>`;
-      }
-      g += `</div>`;
-    });
+    }
+    if (p.abstract) {
+      const short = p.abstract.length > 250;
+      g += `<div class="paper-abstract" data-full="${short?0:1}" style="max-height:${short?"62px":"none"}">${esc(p.abstract)}</div>`;
+      if (short) g += `<button class="toggle-abstract">Show more</button>`;
+    }
+    g += `</div>`;
     return g;
   };
 
-  html += renderGroup(high, "HIGH RELEVANCE", "var(--green)", 0);
-  html += renderGroup(med, "MEDIUM RELEVANCE", "var(--blue)", high.length);
-  html += renderGroup(low, "BROADER INTEREST", "var(--amber)", high.length + med.length);
+  if (state.listMode === "starred" || state.sortBy === "date") {
+    // Reading list and date sort are one continuous list
+    html += visible.map(renderCard).join("");
+  } else {
+    // Papers by watched authors with no topic keyword get their own section, so they don't crowd the topical ones
+    const authorOnly = visible.filter(p => p._hasAuthor && !p._hasCoreKw);
+    const topical = visible.filter(p => !(p._hasAuthor && !p._hasCoreKw));
+    const groups = [
+      [topical.filter(p => p._score >= 10), "HIGH RELEVANCE", "var(--green)"],
+      [topical.filter(p => p._score >= 5 && p._score < 10), "MEDIUM RELEVANCE", "var(--blue)"],
+      [topical.filter(p => p._score < 5), "BROADER INTEREST", "var(--amber)"],
+      [authorOnly, "WATCHED AUTHORS · OTHER TOPICS", "var(--purple)"]
+    ];
+    for (const [papers, label, color] of groups) {
+      if (!papers.length) continue;
+      html += `<h3 class="section-head" style="color:${color};border-bottom-color:${color}">${label} (${papers.length})</h3>`;
+      html += papers.map(renderCard).join("");
+    }
+  }
 
-  html += `<div class="alert alert-info" style="margin-top:24px;font-family:var(--font-mono);font-size:12px"><strong>Sources queried:</strong> bioRxiv · PubMed · OpenAlex · CrossRef · Semantic Scholar. Scoring is deterministic based on your keyword tiers and author watchlist. Click any title to verify at source.</div>`;
+  html += `<div class="alert alert-info" style="margin-top:24px;font-family:var(--font-mono);font-size:12px"><strong>How scoring works:</strong> exact keyword phrase = full tier points, all words present = half, phrase in title = ×1.5, several different keywords = diversity bonus, watched author = +${state.profile.authorScore}. Click any title to verify at source.</div>`;
   return html;
+}
+
+function renderListBar(visible) {
+  const res = state.results || [];
+  const m = state.marks;
+  const counts = {
+    all: res.filter(p => !m.hidden[paperKey(p)]).length,
+    new: res.filter(p => p._new && !m.hidden[paperKey(p)]).length,
+    starred: Object.keys(m.starred).length,
+    hidden: res.filter(p => m.hidden[paperKey(p)]).length
+  };
+  const labels = { all: "All", new: "New", starred: "★ Reading list", hidden: "Hidden" };
+  let h = `<div class="list-bar">`;
+  h += `<div class="seg">`;
+  for (const mode of ["all", "new", "starred", "hidden"]) {
+    if (mode === "hidden" && !counts.hidden && state.listMode !== "hidden") continue;
+    h += `<button class="seg-btn ${state.listMode === mode ? "active" : ""}" data-list-mode="${mode}">${labels[mode]} <span>${counts[mode]}</span></button>`;
+  }
+  h += `</div>`;
+  h += `<input type="text" id="filter-input" placeholder="Filter by word, author, journal…" value="${esc(state.filterText)}" style="flex:1;min-width:160px;width:auto">`;
+  h += `<button class="btn btn-secondary btn-sm" id="btn-toggle-sort" title="Toggle sort order">Sort: ${state.sortBy === "score" ? "Score" : "Date"}</button>`;
+  if (visible.length) {
+    h += `<button class="btn btn-secondary btn-sm" id="btn-copy" title="Copy a plain-text digest of the papers shown">📋 Digest</button>`;
+    h += `<button class="btn btn-secondary btn-sm" id="btn-email-now" title="Email the papers shown">📧 Email</button>`;
+    h += `<button class="btn btn-secondary btn-sm" id="btn-bibtex" title="Copy BibTeX for the papers shown (Zotero: File → Import from Clipboard)">⧉ BibTeX</button>`;
+  }
+  h += `</div>`;
+  return h;
 }
 
 function renderConfig() {
@@ -1578,17 +1864,20 @@ function renderConfig() {
 
   // Basics
   h += `<div class="card" style="display:grid;gap:10px">`;
-  h += `<label style="font-size:12px;font-weight:600">Profile Name<input type="text" id="cfg-name" value="${esc(p.name)}" style="margin-top:4px"></label>`;
-  h += `<label style="font-size:12px;font-weight:600">Description<input type="text" id="cfg-desc" value="${esc(p.description)}" style="margin-top:4px"></label>`;
+  h += `<label style="font-size:12px;font-weight:600">Profile Name<input type="text" id="cfg-name" value="${esc(state.nameInput ?? p.name)}" placeholder="e.g. XNH Connectomics" style="margin-top:4px"></label>`;
+  h += `<label style="font-size:12px;font-weight:600">Description<input type="text" id="cfg-desc" value="${esc(p.description)}" placeholder="One sentence on your research area — used by AI keyword suggestions and AI search" style="margin-top:4px"></label>`;
   h += `<div style="display:flex;gap:8px;align-items:center">`;
   h += `<button class="btn btn-sm" id="btn-ai-suggest-kw" onclick="aiSuggestKeywords()" style="background:var(--gold);color:#fff;justify-self:start">✨ AI Suggest Keywords</button>`;
   if (!state.geminiKey) h += `<span style="font-size:10px;color:var(--muted)">Add Gemini key below to enable</span>`;
   h += `</div>`;
   h += `<div class="flex gap-2">`;
-  h += `<label style="font-size:12px;font-weight:600;flex:1">Lookback (days)<input type="number" id="cfg-days" value="${p.lookbackDays}" min="1" max="90" style="margin-top:4px"></label>`;
-  h += `<label style="font-size:12px;font-weight:600;flex:1">Min Score<input type="number" id="cfg-minscore" value="${p.minScore}" min="0" max="20" style="margin-top:4px"></label>`;
-  h += `<label style="font-size:12px;font-weight:600;flex:1">Author Score<input type="number" id="cfg-authscore" value="${p.authorScore}" min="1" max="20" style="margin-top:4px"></label>`;
+  h += `<div class="flex gap-2" style="flex-wrap:wrap">`;
+  h += `<label style="font-size:12px;font-weight:600;flex:1;min-width:120px">Lookback (days)<input type="number" id="cfg-days" value="${p.lookbackDays}" min="1" max="90" style="margin-top:4px"></label>`;
+  h += `<label style="font-size:12px;font-weight:600;flex:1;min-width:120px">Min Score<input type="number" id="cfg-minscore" value="${p.minScore}" min="0" max="50" style="margin-top:4px"></label>`;
+  h += `<label style="font-size:12px;font-weight:600;flex:1;min-width:120px">Author Score<input type="number" id="cfg-authscore" value="${p.authorScore}" min="0" max="50" style="margin-top:4px"></label>`;
   h += `</div>`;
+  h += `<label style="font-size:12px;font-weight:600">Extra broad search terms <span class="hint">Short terms sent to the databases to widen recall (comma-separated). Not used for scoring — papers still need a tier keyword or watched author.</span><input type="text" id="cfg-extraterms" value="${esc(p.extraSearchTerms || "")}" placeholder="e.g. holotomography, ptychography" style="margin-top:4px"></label>`;
+  h += `<label style="font-size:12px;font-weight:600">bioRxiv categories to scan <span class="hint">Every new preprint in these subjects is scored (comma-separated, lowercase as on bioRxiv). Leave empty to scan all subjects (slower).</span><input type="text" id="cfg-biorxiv" value="${esc(p.biorxivCategories || "")}" placeholder="neuroscience, biophysics, bioengineering" style="margin-top:4px"></label>`;
 
   // Search mode
   h += `<label style="font-size:12px;font-weight:600">Search Mode</label>`;
@@ -1601,12 +1890,11 @@ function renderConfig() {
 
   // API keys
   h += `<div style="margin-top:10px">`;
-  h += `<label style="font-size:12px;font-weight:600">Gemini API Key <span style="color:var(--muted);font-weight:400">(free from <a href="https://aistudio.google.com/apikey" target="_blank" style="color:var(--teal)">aistudio.google.com</a> — also powers paper reviews)</span><input type="text" id="cfg-geminikey" value="${esc(state.geminiKey)}" placeholder="AIza..." style="margin-top:4px"></label>`;
+  h += `<label style="font-size:12px;font-weight:600">Gemini API Key <span style="color:var(--muted);font-weight:400">(free from <a href="https://aistudio.google.com/apikey" target="_blank" style="color:var(--teal)">aistudio.google.com</a> — also powers paper reviews)</span><input type="password" autocomplete="off" id="cfg-geminikey" value="${esc(state.geminiKey)}" placeholder="AIza..." style="margin-top:4px"></label>`;
+  h += `<label style="font-size:12px;font-weight:600;display:block;margin-top:8px">Gemini model <span class="hint">Google retires model IDs regularly; if a model disappears the app falls back to "${GEMINI_FALLBACK_MODEL}".</span><input type="text" id="cfg-geminimodel" value="${esc(state.geminiModel)}" placeholder="${DEFAULT_GEMINI_MODEL}" style="margin-top:4px"></label>`;
   h += `</div>`;
-
-  if (state.searchMode === "anthropic" || state.searchMode === "both") {
-    h += `<label style="font-size:12px;font-weight:600">Anthropic API Key <span style="color:var(--muted);font-weight:400">(optional, from <a href="https://console.anthropic.com" target="_blank" style="color:var(--teal)">console.anthropic.com</a>)</span><input type="text" id="cfg-apikey" value="${esc(state.apiKey)}" placeholder="sk-ant-..." style="margin-top:4px"></label>`;
-  }
+  h += `<label style="font-size:12px;font-weight:600">Anthropic API Key <span style="color:var(--muted);font-weight:400">(optional, from <a href="https://console.anthropic.com" target="_blank" style="color:var(--teal)">console.anthropic.com</a> — billed separately from Claude Team/Pro plans; used for Claude search and reviews)</span><input type="password" autocomplete="off" id="cfg-apikey" value="${esc(state.apiKey)}" placeholder="sk-ant-..." style="margin-top:4px"></label>`;
+  h += `<div class="hint">Keys are stored only in this browser (localStorage) and sent only to Google / Anthropic.</div>`;
   h += `</div>`;
 
   // Show AI suggestions if available
@@ -1616,9 +1904,10 @@ function renderConfig() {
     h += `<div style="font-size:12px;color:var(--muted);margin-bottom:12px">Click a keyword to add it to the tier. Click "Dismiss" when done.</div>`;
     for (const [tierKey, suggestions] of Object.entries(state.kwSuggestions)) {
       const tier = p.tiers[tierKey];
-      if (!tier || !suggestions?.length) continue;
+      if (!tier || !Array.isArray(suggestions) || !suggestions.length) continue;
       const existing = new Set(tier.keywords.map(k => k.toLowerCase()));
-      const novel = suggestions.filter(s => !existing.has(s.toLowerCase()));
+      if (!Array.isArray(suggestions)) continue;
+      const novel = [...new Set(suggestions.filter(s => typeof s === "string" && s.trim()).map(s => s.trim()))].filter(s => !existing.has(s.toLowerCase()));
       if (!novel.length) continue;
       h += `<div style="margin-bottom:10px"><span style="font-weight:600;color:${tier.color};font-size:12px">${tier.label}:</span></div>`;
       h += `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px">`;
@@ -1648,7 +1937,7 @@ function renderConfig() {
 
   // Authors
   h += `<div class="config-section">`;
-  h += `<div class="config-header" style="background:var(--purple)10">`;
+  h += `<div class="config-header" style="background:color-mix(in srgb, var(--purple) 6%, transparent)">`;
   h += `<span style="font-weight:700;color:var(--purple);font-size:13px">Watched Authors <span style="font-weight:400;color:var(--muted);font-size:11px">+${p.authorScore}pts · ${p.authors.length} authors</span></span>`;
   h += `</div><div class="config-body" style="max-height:350px;overflow-y:auto">`;
   // Info banner about OpenAlex IDs
@@ -1662,7 +1951,7 @@ function renderConfig() {
   }
   p.authors.forEach((a, i) => {
     const idBadge = a.openalexId
-      ? `<span style="background:#ecfdf5;color:var(--green);padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;font-family:var(--font-mono)" title="OpenAlex ID: ${esc(a.openalexId)}">✓ ID set</span>`
+      ? `<a href="${esc(safeUrl(a.openalexId))}" target="_blank" rel="noopener" style="background:#ecfdf5;color:var(--green);padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;font-family:var(--font-mono);text-decoration:none" title="Linked to OpenAlex ${esc(oaShortId(a.openalexId))} — click to check the profile">✓ ${esc(oaShortId(a.openalexId))}</a><button class="btn-find-id" data-find-id="${i}" title="Pick a different OpenAlex author" style="background:none;border:1px solid var(--border);color:var(--muted);padding:2px 6px;border-radius:10px;font-size:10px;cursor:pointer">change</button>`
       : `<button class="btn-find-id" data-find-id="${i}" style="background:#fffbeb;color:var(--amber);border:1px solid #fde68a;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;font-family:var(--font-mono);cursor:pointer">🔍 Find ID</button>`;
     h += `<div class="author-row"><span style="font-weight:600;min-width:130px">${esc(a.last)}, ${esc(a.first)}${a.middle ? " "+esc(a.middle).charAt(0)+"." : ""}</span><span style="color:var(--muted);font-size:11px;flex:1">${esc(a.aff)} — ${esc(a.note)}</span>${idBadge}<button class="kw-remove" data-rm-author="${i}">×</button></div>`;
 
@@ -1719,6 +2008,11 @@ function renderConfig() {
   h += `<div class="flex gap-2 mt-3">`;
   h += `<button class="btn btn-primary flex-1" id="btn-save-config" onclick="saveCurrentProfile()">💾 Save Profile</button>`;
   if (state.profiles.length > 1 && !state.isDraft) h += `<button class="btn btn-danger" id="btn-delete-profile" onclick="deleteCurrentProfile()">Delete</button>`;
+  h += `</div>`;
+  h += `<div class="flex gap-2 mt-3" style="flex-wrap:wrap;align-items:center">`;
+  h += `<button class="btn btn-secondary btn-sm" id="btn-export-profile" title="Download this profile as a JSON file to share with lab mates">⤓ Export profile</button>`;
+  h += `<label class="btn btn-secondary btn-sm" style="cursor:pointer" title="Load a profile JSON exported by someone else">⤒ Import profile<input type="file" id="import-profile" accept=".json,application/json" hidden></label>`;
+  h += `<span class="hint" style="margin:0">Share profiles with lab mates — API keys are never included.</span>`;
   h += `</div></div>`;
   return h;
 }
@@ -1730,8 +2024,8 @@ function renderEmail() {
   // Manual email
   h += `<div class="card">`;
   h += `<h3 style="font-family:var(--font-head);font-size:16px;margin-bottom:8px">📧 Send Now</h3>`;
-  h += `<p style="font-size:13px;color:var(--muted);margin-bottom:12px">Run a search first, then click to compose an email with this week's digest.</p>`;
-  h += `<label style="font-size:12px;font-weight:600">Recipients (comma-separated)<input type="email" id="cfg-email-recipients" value="${esc(state.profile.emailRecipients||"")}" placeholder="you@esrf.fr, colleague@crick.ac.uk" style="margin-top:4px"></label>`;
+  h += `<p style="font-size:13px;color:var(--muted);margin-bottom:12px">Run a search first, then compose an email with the papers currently shown on the Results tab (respecting your New / Reading list / filter selection).</p>`;
+  h += `<label style="font-size:12px;font-weight:600">Recipients (comma-separated)<input type="email" multiple id="cfg-email-recipients" value="${esc(state.profile.emailRecipients||"")}" placeholder="you@esrf.fr, colleague@crick.ac.uk" style="margin-top:4px"></label>`;
   h += `<div class="flex gap-2 mt-3">`;
   h += `<button class="btn btn-primary btn-sm" id="btn-email-send" ${state.results?"":"disabled"}>📧 Compose Email</button>`;
   h += `<button class="btn btn-secondary btn-sm" id="btn-copy-digest" ${state.results?"":"disabled"}>📋 Copy Full Digest</button>`;
@@ -1753,7 +2047,7 @@ python3 lit_monitor.py --days 14 --html digest.html
 # 4. Set up weekly cron (Sunday 8am)
 crontab -e
 0 8 * * 0 python3 ~/scripts/lit_monitor.py --email</div>`;
-  h += `<p style="font-size:12px;color:var(--muted);margin-top:8px">The Python script queries bioRxiv, PubMed, and arXiv APIs directly — zero hallucination risk, zero API key needed.</p>`;
+  h += `<p style="font-size:12px;color:var(--muted);margin-top:8px">Note: the companion script is not part of this repository — ask whoever set up the monitor for <code>lit_monitor.py</code>. Its results will differ from this page, which also searches Europe PMC, OpenAlex, CrossRef and Semantic Scholar.</p>`;
   h += `</div></div>`;
   return h;
 }
@@ -1767,15 +2061,56 @@ function bindEvents() {
   c.onclick = handleClick;
   c.oninput = handleInput;
   c.onkeydown = handleKeydown;
+  c.onchange = handleChange;
+}
+
+// Add a keyword to a tier (trimmed, no case-insensitive duplicates) and auto-save
+function addKeyword(tierKey, raw) {
+  const kw = String(raw || "").trim();
+  const tier = state.profile.tiers[tierKey];
+  if (!kw || !tier) return false;
+  if (tier.keywords.some(k => k.toLowerCase() === kw.toLowerCase())) {
+    state.message = { type: "warn", text: `"${kw}" is already in ${tier.label}.` };
+  } else {
+    tier.keywords.push(kw);
+    saveProfile();
+  }
+  return true;
+}
+
+function toggleMark(kind, key) {
+  const m = state.marks[kind];
+  if (m[key]) delete m[key];
+  else if (kind === "starred") {
+    const p = findPaper(key);
+    if (!p) return;
+    // Store a compact copy so the reading list survives future searches
+    const { _openalexAuthorIds, ...rest } = p;
+    m[key] = { ...rest, _starredAt: Date.now() };
+  } else m[key] = Date.now();
+  saveMarks();
+  render();
 }
 
 function handleClick(e) {
   const t = e.target;
   if (t.id === "btn-search") runSearch();
-  if (t.id === "btn-copy") { navigator.clipboard.writeText(generateDigest(state.results, state.profile)); state.message = { type:"success", text:"Digest copied!" }; render(); }
-  if (t.id === "btn-toggle-sort") { state.sortBy = state.sortBy === "score" ? "date" : "score"; render(); }
-  if (t.id === "btn-email-now" || t.id === "btn-email-send") { state.profile.emailRecipients = ($("cfg-email-recipients")||{}).value || state.profile.emailRecipients; saveProfile(); emailDigest(); }
-  if (t.id === "btn-copy-digest") { navigator.clipboard.writeText(generateDigest(state.results, state.profile)); state.message = { type:"success", text:"Full digest copied to clipboard!" }; render(); }
+  if (t.id === "btn-copy" || t.id === "btn-copy-digest") { const v = visiblePapers(); if (v.length) copyText(generateDigest(v, state.profile), `Digest of ${v.length} papers copied to clipboard.`); }
+  if (t.id === "btn-bibtex") { const v = visiblePapers(); if (v.length) copyText(toBibtex(v), `BibTeX for ${v.length} papers copied — in Zotero use File → Import from Clipboard.`); }
+  if (t.id === "btn-toggle-sort") { state.sortBy = state.sortBy === "score" ? "date" : "score"; try { localStorage.setItem("lm-sort", state.sortBy); } catch {} render(); }
+  if (t.id === "btn-email-now" || t.id === "btn-email-send") { saveProfile(); emailDigest(); }
+  if (t.closest("[data-list-mode]")) { state.listMode = t.closest("[data-list-mode]").dataset.listMode; render(); }
+  if (t.dataset.star) toggleMark("starred", t.dataset.star);
+  if (t.dataset.hide) toggleMark("hidden", t.dataset.hide);
+  if (t.id === "btn-export-profile") {
+    const p = state.profile;
+    const blob = new Blob([JSON.stringify({ litMonitorProfile: 1, ...p, emailRecipients: "" }, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${(p.name || "profile").replace(/[^\w.-]+/g, "_")}.lit-monitor.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
   // Note: btn-save-config and btn-delete-profile now use inline onclick → saveCurrentProfile()/deleteCurrentProfile()
   if (t.id === "btn-add-author") {
     const last = $("new-auth-last")?.value?.trim();
@@ -1792,6 +2127,7 @@ function handleClick(e) {
     if (orcidMatch) {
       newAuthor.orcid = `https://orcid.org/${orcidMatch[1]}`;
       state.profile.authors.push(newAuthor);
+      saveProfile();
       const idx = state.profile.authors.length - 1;
       state.message = { type: "info", text: `Resolving ORCID ${orcidMatch[1]}…` };
       render();
@@ -1812,16 +2148,15 @@ function handleClick(e) {
         });
     } else {
       state.profile.authors.push(newAuthor);
+      saveProfile();
+      state.message = { type: "info", text: `Added ${newAuthor.first} ${last}. Click 🔍 Find ID next to the name for exact matching.` };
       render();
     }
   }
   // Accept a suggested keyword
   if (t.dataset.acceptKw) {
     const [tierKey, kw] = t.dataset.acceptKw.split(":::");
-    if (state.profile.tiers[tierKey]) {
-      state.profile.tiers[tierKey].keywords.push(kw);
-      render();
-    }
+    if (addKeyword(tierKey, kw)) render();
   }
   // Dismiss suggestions
   if (t.id === "btn-dismiss-suggestions") {
@@ -1903,11 +2238,14 @@ function handleClick(e) {
   // Remove keyword
   if (t.classList.contains("kw-remove") && t.dataset.tier != null) {
     state.profile.tiers[t.dataset.tier].keywords.splice(parseInt(t.dataset.idx), 1);
+    saveProfile();
     render();
   }
   // Remove author
   if (t.classList.contains("kw-remove") && t.dataset.rmAuthor != null) {
     state.profile.authors.splice(parseInt(t.dataset.rmAuthor), 1);
+    state.idLookup = null;  // indices shift — close any open lookup
+    saveProfile();
     render();
   }
   // Bulk auto-resolve OpenAlex IDs
@@ -1923,9 +2261,10 @@ function handleClick(e) {
       for (const { a, i } of targets) {
         const candidates = await lookupAuthorId(`${a.first} ${a.last}`, a.aff);
         if (candidates.length > 0) {
-          const affWords = (a.aff || "").toLowerCase().split(/[\s,.()/-]+/).filter(w => w.length > 3);
-          let best = candidates.find(c => affWords.some(w => (c.hint || "").toLowerCase().includes(w)));
-          if (!best) best = candidates.sort((x,y) => y.cited - x.cited)[0];
+          // Candidates come back ranked: affiliation match first, then by number of works.
+          // Require the candidate's surname to match, so we never link a different person.
+          const best = candidates.find(c => foldAccents(c.name).toLowerCase().includes(foldAccents(a.last).toLowerCase()));
+          if (!best) { processed++; continue; }
           state.profile.authors[i].openalexId = best.id;
           if (best.orcid && best.orcid.includes("orcid.org")) state.profile.authors[i].orcid = best.orcid;
           resolved++;
@@ -1990,31 +2329,27 @@ function handleClick(e) {
   // Add keyword button
   if (t.dataset.addTier) {
     const inp = document.querySelector(`.kw-input[data-tier="${t.dataset.addTier}"]`);
-    if (inp?.value.trim()) { state.profile.tiers[t.dataset.addTier].keywords.push(inp.value.trim()); render(); }
+    if (addKeyword(t.dataset.addTier, inp?.value)) render();
   }
   // Toggle abstract
   if (t.classList.contains("toggle-abstract")) {
     const abs = t.previousElementSibling;
     const full = abs.dataset.full === "1";
-    abs.style.maxHeight = full ? "55px" : "none";
+    abs.style.maxHeight = full ? "62px" : "none";
     abs.dataset.full = full ? "0" : "1";
     t.textContent = full ? "Show more" : "Show less";
   }
   // Review button
   if (t.classList.contains("btn-review") || t.closest(".btn-review")) {
     const btn = t.classList.contains("btn-review") ? t : t.closest(".btn-review");
-    const idx = parseInt(btn.dataset.reviewIdx);
-    if (!isNaN(idx)) openReview(idx);
+    if (btn.dataset.reviewKey) openReview(btn.dataset.reviewKey);
   }
   // Search mode radio
-  if (t.tagName === "INPUT" && t.name === "searchmode") {
-    state.searchMode = t.value;
-    render();
-  }
-  // Also handle label clicks for radio buttons
-  if (t.tagName === "LABEL" && t.querySelector('input[name="searchmode"]')) {
-    const radio = t.querySelector('input[name="searchmode"]');
+  const modeLabel = t.closest("label");
+  const radio = t.name === "searchmode" ? t : modeLabel?.querySelector('input[name="searchmode"]');
+  if (radio && radio.value !== state.searchMode) {
     state.searchMode = radio.value;
+    try { localStorage.setItem("lm-searchmode", state.searchMode); } catch {}
     render();
   }
 }
@@ -2023,22 +2358,55 @@ function handleInput(e) {
   const t = e.target;
   if (!t || !t.id) return;
   // Sync form fields → state on every keystroke so re-renders preserve typed values
+  const num = (v, fallback) => { const n = parseInt(v); return Number.isFinite(n) && n >= 0 ? n : fallback; };
   switch (t.id) {
-    case "cfg-name":       state.profile.name = t.value; break;
+    case "cfg-name":       state.nameInput = t.value; return;  // applied on Save (renames move stored data)
     case "cfg-desc":       state.profile.description = t.value; break;
-    case "cfg-days":       state.profile.lookbackDays = parseInt(t.value) || 7; break;
-    case "cfg-minscore":   state.profile.minScore = parseInt(t.value) || 0; break;
-    case "cfg-authscore":  state.profile.authorScore = parseInt(t.value) || 8; break;
-    case "cfg-apikey":     state.apiKey = t.value; break;
-    case "cfg-geminikey":  state.geminiKey = t.value; break;
+    case "cfg-days":       state.profile.lookbackDays = Math.min(90, Math.max(1, num(t.value, 7))); break;
+    case "cfg-minscore":   state.profile.minScore = num(t.value, 0); break;
+    case "cfg-authscore":  state.profile.authorScore = num(t.value, 8); break;
+    case "cfg-extraterms": state.profile.extraSearchTerms = t.value; break;
+    case "cfg-biorxiv":    state.profile.biorxivCategories = t.value; break;
+    case "cfg-apikey":     state.apiKey = t.value.trim(); try { localStorage.setItem("lm-apikey", state.apiKey); } catch {} return;
+    case "cfg-geminikey":  state.geminiKey = t.value.trim(); try { localStorage.setItem("lm-geminikey", state.geminiKey); } catch {} return;
+    case "cfg-geminimodel": state.geminiModel = t.value.trim(); try { localStorage.setItem("lm-geminimodel", state.geminiModel); } catch {} return;
     case "cfg-email-recipients": state.profile.emailRecipients = t.value; break;
+    case "filter-input":   state.filterText = t.value; render(); return;
+    default: return;
   }
+  // Settings auto-save (drafts are only saved via the Save button)
+  saveProfile();
+}
+
+// Import a profile JSON exported by a lab mate
+function handleChange(e) {
+  const t = e.target;
+  if (t.id !== "import-profile" || !t.files?.[0]) return;
+  const file = t.files[0];
+  file.text().then(txt => {
+    const data = JSON.parse(txt);
+    if (!data || typeof data !== "object" || !data.tiers || !data.name) throw new Error("not a Literature Monitor profile");
+    delete data.litMonitorProfile;
+    let name = String(data.name).trim(), n = 2;
+    while (state.profiles.includes(name)) name = `${data.name} (${n++})`;
+    const prof = upgradeProfile({ ...JSON.parse(JSON.stringify(DEFAULT_PROFILE)), ...data, name, emailRecipients: "" });
+    state.isDraft = false;
+    state.profile = prof;
+    state.activeProfile = name;
+    saveProfile(prof);
+    switchProfile(name);
+    state.view = "config";
+    state.message = { type: "success", text: `Imported profile "${name}".` };
+    render();
+  }).catch(err => {
+    state.message = { type: "warn", text: `Could not import ${file.name}: ${err.message}` };
+    render();
+  });
 }
 
 function handleKeydown(e) {
   if (e.key === "Enter" && e.target.classList.contains("kw-input")) {
-    const tier = e.target.dataset.tier;
-    if (e.target.value.trim()) { state.profile.tiers[tier].keywords.push(e.target.value.trim()); render(); }
+    if (addKeyword(e.target.dataset.tier, e.target.value)) render();
   }
   if (e.key === "Enter" && e.target.classList.contains("lookup-search")) {
     const idx = parseInt(e.target.dataset.lookupIdx);
@@ -2073,20 +2441,28 @@ $("profile-select").addEventListener("change", e => {
       return;
     }
   }
+  switchProfile(name);
+  render();
+});
+
+// Load a stored profile (and its results / reading list) as the active one
+function switchProfile(name) {
   state.activeProfile = name;
-  state.profile = JSON.parse(localStorage.getItem("lm-p:" + name) || "null");
-  if (!state.profile) state.profile = JSON.parse(JSON.stringify(DEFAULT_PROFILE));
-  const r = JSON.parse(localStorage.getItem("lm-r:" + name) || "null");
+  state.profile = upgradeProfile(lsGet("lm-p:" + name, null)) || upgradeProfile(JSON.parse(JSON.stringify({ ...DEFAULT_PROFILE, name })));
+  const r = lsGet("lm-r:" + name, null);
   state.results = r?.papers || null;
   state.searchDate = r?.date || null;
+  state.marks = loadMarks(name);
   state.isDraft = false;
+  state.nameInput = null;
   state.message = null;
   state.pipelineInfo = null;
   state.kwSuggestions = null;
   state.idLookup = null;
-  localStorage.setItem("lm-active", name);
-  render();
-});
+  state.filterText = "";
+  state.listMode = "all";
+  try { localStorage.setItem("lm-active", name); } catch {}
+}
 
 // ============================================================
 // GLOBAL FUNCTIONS (called via inline onclick — most robust pattern)
@@ -2151,9 +2527,15 @@ window.createNewProfile = function() {
       tier3: { label: "Broader Field", score: 3, color: "#b08d57", keywords: [] }
     },
     authors: [],
+    biorxivCategories: "",
+    extraSearchTerms: "",
     emailRecipients: ""
   };
   state.activeProfile = null;       // No active profile — it's a draft
+  state.nameInput = "";
+  state.marks = { seen: {}, starred: {}, hidden: {} };
+  state.listMode = "all";
+  state.filterText = "";
   state.isDraft = true;             // Flag for UI to show draft warning
   state.results = null;
   state.searchDate = null;
@@ -2178,30 +2560,35 @@ window.saveCurrentProfile = function() {
   const wasDraft = state.isDraft === true;
   const oldName = state.activeProfile;
 
-  // For drafts: check for name conflicts with existing profiles
-  if (wasDraft && state.profiles.includes(newName)) {
+  // Name conflicts with another existing profile (new or renamed)
+  if (newName !== oldName && state.profiles.includes(newName)) {
     state.message = { type: "warn", text: `⚠️ A profile named "${newName}" already exists. Choose a different name.` };
     render();
     return;
   }
 
-  // For renames: clean up the old profile entry
+  // For renames: move stored results / reading list to the new name, keep list order
   if (!wasDraft && oldName && oldName !== newName) {
-    console.log("[Save] Renaming from", oldName, "to", newName, "— removing old entry");
+    for (const prefix of ["lm-r:", "lm-m:"]) {
+      const v = localStorage.getItem(prefix + oldName);
+      if (v != null) { try { localStorage.setItem(prefix + newName, v); } catch {} }
+      localStorage.removeItem(prefix + oldName);
+    }
     localStorage.removeItem("lm-p:" + oldName);
-    localStorage.removeItem("lm-r:" + oldName);
-    state.profiles = state.profiles.filter(n => n !== oldName);
+    state.profiles = state.profiles.map(n => n === oldName ? newName : n);
   }
 
   // Update profile from form fields
   state.profile.name = newName;
   state.profile.description = document.getElementById("cfg-desc")?.value || "";
-  state.profile.lookbackDays = parseInt(document.getElementById("cfg-days")?.value) || 7;
-  state.profile.minScore = parseInt(document.getElementById("cfg-minscore")?.value) || 2;
-  state.profile.authorScore = parseInt(document.getElementById("cfg-authscore")?.value) || 8;
+  const num = (id, fallback) => { const n = parseInt(document.getElementById(id)?.value); return Number.isFinite(n) && n >= 0 ? n : fallback; };
+  state.profile.lookbackDays = Math.min(90, Math.max(1, num("cfg-days", 7)));
+  state.profile.minScore = num("cfg-minscore", 2);     // 0 is a valid choice (was silently reset to 2)
+  state.profile.authorScore = num("cfg-authscore", 8);
 
   state.activeProfile = newName;
   state.isDraft = false;
+  state.nameInput = null;
 
   // Save API keys
   const geminiKeyInput = document.getElementById("cfg-geminikey");
@@ -2213,6 +2600,7 @@ window.saveCurrentProfile = function() {
 
   // Persist profile (adds to state.profiles if not present, saves to localStorage)
   saveProfile();
+  saveMarks();
 
   state.message = { type: "success", text: `✓ Profile "${newName}" saved!` };
   state.view = "results";
@@ -2235,13 +2623,10 @@ window.deleteCurrentProfile = function() {
   localStorage.removeItem("lm-r:" + toDelete);
   localStorage.setItem("lm-profiles", JSON.stringify(state.profiles));
 
-  // Switch to the first remaining profile
-  state.activeProfile = state.profiles[0];
-  state.profile = JSON.parse(localStorage.getItem("lm-p:" + state.activeProfile) || "null")
-                  || JSON.parse(JSON.stringify(DEFAULT_PROFILE));
-  state.isDraft = false;
-  state.results = null;
-  state.searchDate = null;
+  localStorage.removeItem("lm-m:" + toDelete);
+
+  // Switch to the first remaining profile (with its saved results)
+  switchProfile(state.profiles[0]);
   state.message = { type: "success", text: `Deleted "${toDelete}".` };
   state.view = "results";
   render();
